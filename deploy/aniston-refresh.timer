@@ -1,0 +1,11 @@
+[Unit]
+Description=Aniston refresh: Tue after MNF, Wed after waivers, Sun before kickoff
+
+[Timer]
+OnCalendar=Tue *-*-* 07:00
+OnCalendar=Wed *-*-* 09:00
+OnCalendar=Sun *-*-* 11:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

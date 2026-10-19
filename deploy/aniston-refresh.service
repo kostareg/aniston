@@ -1,0 +1,9 @@
+[Unit]
+Description=Aniston: refresh ESPN/Sleeper/nflverse data and rerun models
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/Projects/aniston
+ExecStart=/run/current-system/sw/bin/nix develop %h/Projects/aniston -c uv run aniston refresh
+ExecStart=/run/current-system/sw/bin/nix develop %h/Projects/aniston -c uv run aniston analyze
