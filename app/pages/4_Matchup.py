@@ -17,7 +17,9 @@ live = load("live")
 
 def win_prob(mu_a, sd_a, mu_b, sd_b):
     sd = math.hypot(sd_a, sd_b)
-    return 0.5 if sd == 0 else 0.5 * (1 + math.erf((mu_a - mu_b) / (sd * math.sqrt(2))))
+    if sd == 0:  # every game is final: the result is decided
+        return 1.0 if mu_a > mu_b else 0.0 if mu_a < mu_b else 0.5
+    return 0.5 * (1 + math.erf((mu_a - mu_b) / (sd * math.sqrt(2))))
 
 
 row = live.filter(pl.col("team_id") == me)
