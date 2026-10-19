@@ -27,13 +27,26 @@ uv run aniston backtest    # projection accuracy per source on completed weeks
 uv run streamlit run app/Home.py
 ```
 
-Automatic refresh (Tue after MNF, Wed after waivers, Sun before kickoff):
+## Self-hosting (NixOS)
+
+The dashboard runs as a systemd user service on port 1313, and a timer refreshes data and models
+(Tue after MNF, Wed after waivers, Sun before kickoff). Clone to `~/Projects/aniston`, copy `.env`, then:
 
 ```fish
 mkdir -p ~/.config/systemd/user
-cp deploy/aniston-refresh.* ~/.config/systemd/user/
-systemctl --user daemon-reload; and systemctl --user enable --now aniston-refresh.timer
+cp deploy/aniston-* ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now aniston-dashboard.service aniston-refresh.timer
+journalctl --user -u aniston-dashboard -f    # logs; first start builds the dev shell
 ```
+
+User services stop at logout unless lingering is on. In `configuration.nix`:
+`users.users.<you>.linger = true;`
+
+The dashboard listens on `127.0.0.1:1313` because it has no login and shows your trade targets. Reach it through
+Cloudflare Tunnel + Access (or a reverse proxy with auth). To expose it directly instead, set
+`STREAMLIT_SERVER_ADDRESS=0.0.0.0` in `deploy/aniston-dashboard.service` and open the port:
+`networking.firewall.allowedTCPPorts = [ 1313 ];`
 
 ## How it works
 
