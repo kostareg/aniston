@@ -25,6 +25,12 @@
             default = "127.0.0.1";
             description = "Address on which Streamlit listens.";
           };
+
+          env = lib.mkOption {
+            type = lib.types.str;
+            default = "";
+            description = "Environment file that has ESPN_S2, SWID, LEAGUE_ID";
+          };
         };
 
         config = lib.mkIf config.services.aniston.enable {
@@ -60,6 +66,7 @@
               Type = "exec";
               User = "aniston";
               Group = "aniston";
+              EnvironmentFile = config.services.aniston.env;
 
               StateDirectory = "aniston";
               CacheDirectory = "aniston";
