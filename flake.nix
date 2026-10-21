@@ -27,9 +27,9 @@
           };
 
           env = lib.mkOption {
-            type = lib.types.str;
+            type = lib.types.path;
             default = "";
-            description = "Environment file that has ESPN_S2, SWID, LEAGUE_ID";
+            description = "Environment file that has ESPN_S2, SWID, LEAGUE_ID, and SEASON.";
           };
         };
 
