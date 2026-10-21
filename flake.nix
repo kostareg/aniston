@@ -66,7 +66,7 @@
               WorkingDirectory = "${self}";
 
               ExecStart = ''
-                ${pkgs.nix}/bin/nix develop ${self} -c \
+                ${pkgs.nix}/bin/nix develop ${self}#default -c \
                   ${pkgs.uv}/bin/uv run --project ${self} \
                   streamlit run ${self}/app/Home.py
               '';
