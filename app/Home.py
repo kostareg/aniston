@@ -3,6 +3,7 @@ import polars as pl
 import streamlit as st
 
 from aniston.ui import BLUE, ORANGE, as_pct, load, meta, page, pct, ready
+from aniston.store import connect
 
 page("League")
 with connect() as con:
