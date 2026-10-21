@@ -5,6 +5,13 @@ import streamlit as st
 from aniston.ui import BLUE, ORANGE, as_pct, load, meta, page, pct, ready
 
 page("League")
+with connect() as con:
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS kv (
+            key VARCHAR PRIMARY KEY,
+            value VARCHAR
+        )
+    """)
 m = meta()
 st.title(m.get("league_name", "Aniston"))
 
