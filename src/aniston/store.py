@@ -34,6 +34,9 @@ def has(name: str) -> bool:
 def put_json(key: str, value) -> None:
     write_kv = pl.DataFrame({"key": [key], "value": [json.dumps(value)], "updated": [datetime.now()]})
     with connect() as con:
+        cols = [r[0] for r in con.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'kv'").fetchall()]
+        if cols and "updated" not in cols:  # stale schema; kv is rebuilt by refresh, so dropping is safe
+            con.execute("DROP TABLE kv")
         con.execute("CREATE TABLE IF NOT EXISTS kv (key VARCHAR PRIMARY KEY, value VARCHAR, updated TIMESTAMP)")
         con.register("_kv", write_kv.to_arrow())
         con.execute("INSERT OR REPLACE INTO kv SELECT * FROM _kv")
@@ -41,6 +44,8 @@ def put_json(key: str, value) -> None:
 
 
 def get_json(key: str):
+    if not settings().db_path.exists() or not has("kv"):
+        return None
     with connect(read_only=True) as con:
         row = con.execute("SELECT value FROM kv WHERE key = ?", [key]).fetchone()
     return json.loads(row[0]) if row else None

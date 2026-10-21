@@ -27,8 +27,8 @@
           };
 
           env = lib.mkOption {
-            type = lib.types.path;
-            default = "";
+            type = lib.types.nullOr lib.types.path;
+            default = null;
             description = "Environment file that has ESPN_S2, SWID, LEAGUE_ID, and SEASON.";
           };
         };
@@ -55,6 +55,7 @@
               UV_CACHE_DIR = "/var/cache/aniston";
               UV_PYTHON = "${pkgs.python312}/bin/python3.12";
               UV_PYTHON_DOWNLOADS = "never";
+              DB_PATH = "/var/lib/aniston/aniston.duckdb";
 
               STREAMLIT_SERVER_ADDRESS = config.services.aniston.address;
               STREAMLIT_SERVER_PORT = toString config.services.aniston.port;
@@ -66,7 +67,7 @@
               Type = "exec";
               User = "aniston";
               Group = "aniston";
-              EnvironmentFile = config.services.aniston.env;
+              EnvironmentFile = lib.mkIf (config.services.aniston.env != null) config.services.aniston.env;
 
               StateDirectory = "aniston";
               CacheDirectory = "aniston";

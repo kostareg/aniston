@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     league_id: int
     season: int = 2026
     my_team_id: int | None = None  # derived from SWID when unset
-    db_path: Path = Path("/var/lib/aniston/aniston.duckdb")
+    db_path: Path = ROOT / "data" / "aniston.duckdb"  # DB_PATH overrides; the NixOS module points it at the state dir
 
     # Projection ensemble weights (renormalized over available sources per player-week). Backtest on weeks
     # 2-5 of 2026 fit ESPN 0.36 / Sleeper 0.64 / usage 0.0; usage keeps a small share for its ROS signal.
