@@ -65,7 +65,7 @@ def projection_weeks(ctx: TradeContext) -> pl.DataFrame:
     return pl.concat(rows)
 
 
-def analyze(with_trades: bool = True) -> dict:
+def analyze(with_trades: bool = True, workers: int = 1) -> dict:
     ctx = TradeContext()
     teams = store.read("teams").select("team_id", "name")
     store.write("sim_baseline", ctx.base_result.frame().join(teams, on="team_id"))
@@ -84,7 +84,7 @@ def analyze(with_trades: bool = True) -> dict:
     except Exception as e:  # noqa: BLE001 - backtest is diagnostic only
         report["backtest_mae"] = f"failed: {e}"
     if with_trades:
-        trades = ctx.frame(ctx.find())
+        trades = ctx.frame(ctx.find(workers=workers))
         store.write("trade_ideas", trades)
         report["trades"] = trades.height
     store.put_json("analysis", {"at": datetime.now().isoformat(timespec="minutes"), **report})

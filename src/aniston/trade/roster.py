@@ -51,13 +51,27 @@ class RosterValuer:
     def best_pickup(self, roster: tuple[int, ...], free_agents: list[int]) -> int | None:
         """Free agent adding the most lineup points; when none adds any (pure depth), the best by ROS points.
         Managers always fill an open spot, and depth still matters once injuries are simulated."""
+        fas = self.shortlist(free_agents)
+        if not fas:
+            return None
         base = self.value(tuple(sorted(roster)))
         best, key = None, (-np.inf, -np.inf)
-        for fa in self.shortlist(free_agents):
-            k = (round(self.value(tuple(sorted(roster + (fa,)))) - base, 6), self.ros[fa])
+        for fa, v in zip(fas, self._values_with_each(roster, fas)):
+            k = (round(v - base, 6), self.ros[fa])
             if k > key:
                 best, key = fa, k
         return best
+
+    def _values_with_each(self, roster: tuple[int, ...], fas: list[int]) -> np.ndarray:
+        """Roster value with each free agent added, in one batched lineup evaluation: one extra column per
+        free-agent position, filled for that free agent and -inf (an empty slot) otherwise."""
+        r = np.fromiter(roster, dtype=int)
+        n = len(r)
+        extra = list(dict.fromkeys(self.pos[fas]))
+        values = np.full((len(fas), self.mat.shape[1], n + len(extra)), -np.inf)
+        values[:, :, :n] = self.mat[r].T
+        values[np.arange(len(fas)), :, [n + extra.index(self.pos[fa]) for fa in fas]] = self.mat[fas]
+        return self.spec.evaluate(values, np.append(self.pos[r], extra)) @ self.w
 
     def legalize(self, roster: tuple[int, ...], free_agents: list[int], protected: set[int] = frozenset(),
                  allow_pickup: bool = True) -> tuple[tuple[int, ...], list[int], list[int]]:

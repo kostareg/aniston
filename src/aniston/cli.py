@@ -20,11 +20,14 @@ def refresh():
 
 
 @app.command()
-def analyze(trades: bool = typer.Option(True, help="Also run the trade finder (about 30s).")):
+def analyze(trades: bool = typer.Option(True, help="Also run the trade finder."),
+            workers: int = typer.Option(0, help="Processes for the trade finder (0 = all CPU cores).")):
     """Run projections, the season simulation, waivers and the trade finder; store results for the dashboard."""
+    import os
+
     from aniston.analyze import analyze as run
 
-    typer.echo(run(with_trades=trades))
+    typer.echo(run(with_trades=trades, workers=workers or os.cpu_count() or 1))
 
 
 @app.command()

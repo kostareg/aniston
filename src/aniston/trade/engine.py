@@ -7,6 +7,7 @@ season simulation on the most promising ones.
   P(accept), P(no veto) from those perceived quantities
   final ranking       = Δ P(title) for me (paired simulation) x P(accept) x P(no veto)
 """
+import multiprocessing
 from dataclasses import dataclass, field
 from itertools import combinations
 
@@ -118,26 +119,44 @@ class TradeContext:
         return r[:size] if size else r
 
     def candidates(self, partners: list[int] | None = None, max_players: int = 2,
-                   untouchable: set[int] = frozenset(), must_include: set[int] = frozenset()) -> list[Trade]:
-        s = settings()
+                   untouchable: set[int] = frozenset(), must_include: set[int] = frozenset(),
+                   workers: int = 1) -> list[Trade]:
+        """`workers` > 1 scores partners in forked processes; only use it outside Streamlit (forking a
+        threaded server is unsafe)."""
         partners = partners or [t for t in self.base if t != self.me]
+        args = [(p, max_players, untouchable, must_include) for p in partners]
+        if workers > 1 and len(partners) > 1:
+            global _FORK_CTX
+            _FORK_CTX = self
+            try:
+                with multiprocessing.get_context("fork").Pool(min(workers, len(partners))) as pool:
+                    per_partner = pool.starmap(_partner_candidates, args, chunksize=1)
+            finally:
+                _FORK_CTX = None
+        else:
+            per_partner = [self._partner_candidates(*a) for a in args]
+        out = [t for ts in per_partner for t in ts]
+        out.sort(key=lambda t: -t.proxy)
+        return out
+
+    def _partner_candidates(self, p: int, max_players: int, untouchable: set[int],
+                            must_include: set[int]) -> list[Trade]:
+        s = settings()
         my_all = self._pool(self.me, None, untouchable)
         my_top = my_all[: s.trade_pool_size]
+        their_all = self._pool(p, None, set())
+        their_top = their_all[: s.trade_pool_size]
         out = []
-        for p in partners:
-            their_all = self._pool(p, None, set())
-            their_top = their_all[: s.trade_pool_size]
-            shapes = [(1, 1)] + ([(2, 1), (1, 2), (2, 2)] if max_players >= 2 else [])
-            for ng, nr in shapes:
-                gives = combinations(my_all if ng == 1 else my_top, ng)
-                for give in gives:
-                    if must_include and not must_include & set(give):
-                        continue
-                    for get in combinations(their_all if nr == 1 else their_top, nr):
-                        t = self.build_trade(p, give, get, min_my_gain=0.0)
-                        if t is not None and t.p_accept >= s.trade_min_accept:
-                            out.append(t)
-        out.sort(key=lambda t: -t.proxy)
+        shapes = [(1, 1)] + ([(2, 1), (1, 2), (2, 2)] if max_players >= 2 else [])
+        for ng, nr in shapes:
+            gives = combinations(my_all if ng == 1 else my_top, ng)
+            for give in gives:
+                if must_include and not must_include & set(give):
+                    continue
+                for get in combinations(their_all if nr == 1 else their_top, nr):
+                    t = self.build_trade(p, give, get, min_my_gain=0.0)
+                    if t is not None and t.p_accept >= s.trade_min_accept:
+                        out.append(t)
         return out
 
     # ------------------------------------------------------------------ simulation
@@ -185,3 +204,10 @@ class TradeContext:
             "give_ids": [int(self.players["espn_id"][i]) for i in t.give],
             "get_ids": [int(self.players["espn_id"][i]) for i in t.get],
         } for t in trades])
+
+
+_FORK_CTX: TradeContext | None = None  # inherited by forked workers, so the context is never pickled
+
+
+def _partner_candidates(*args) -> list[Trade]:
+    return _FORK_CTX._partner_candidates(*args)

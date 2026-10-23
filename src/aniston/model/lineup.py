@@ -32,6 +32,7 @@ class LineupSpec:
         for p, n in self.dedicated.items():
             v = np.sort(values[..., pos == p], axis=-1)[..., ::-1]
             take = v[..., :n]
+            take = np.where(np.isfinite(take), take, 0.0)  # -inf marks an empty column (batched rosters)
             total += take.sum(-1)
             if with_var:
                 var += ((self.cv.get(p, 0.5) * take) ** 2).sum(-1)
