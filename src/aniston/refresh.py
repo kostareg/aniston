@@ -13,6 +13,7 @@ log = logging.getLogger(__name__)
 
 def refresh() -> dict:
     s = settings()
+    espn.league.cache_clear()  # a long-lived process (the dashboard) would otherwise reuse a stale League forever
     meta = espn.fetch_meta()
     store.put_json("meta", meta)
     report = {"meta": "ok"}
