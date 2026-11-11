@@ -118,7 +118,8 @@ def build(fa_per_pos: int = 15, through_week: int | None = None) -> Projections:
     fp = universe["fp_pg"].fill_null(np.nan).to_numpy().astype(float)
     obs = np.where(np.isnan(xfp), fp, XFP_WEIGHT * xfp + (1 - XFP_WEIGHT) * np.nan_to_num(fp, nan=0.0))
     usage_rate = np.where(np.isnan(obs), src_rate, (g * np.nan_to_num(obs) + USAGE_PRIOR_GAMES * src_rate) / (g + USAGE_PRIOR_GAMES))
-    usage = np.where(plays, usage_rate[:, None], 0.0)
+    # Weeks ESPN has the player out get no usage projection: a 0 here would just repeat ESPN's vote.
+    usage = np.where(plays, usage_rate[:, None], np.nan)
     usage[universe["pos"].is_in(["K", "D/ST"]).to_numpy()] = np.nan  # no usage model for K/DST
     usage[g == 0] = np.nan
     sources["usage"] = usage
@@ -128,7 +129,8 @@ def build(fa_per_pos: int = 15, through_week: int | None = None) -> Projections:
     den = np.zeros((P, W))
     for name, m in sources.items():
         have = ~np.isnan(m)
-        # A source that is missing while ESPN says the player is out stays missing; otherwise contribute.
+        # Missing sources drop out and the rest renormalize. ESPN is never missing: its 0 ("out") is a real
+        # projection, so when Sleeper still has the player playing the blend lands in between.
         num += np.where(have, weights[name] * np.nan_to_num(m), 0.0)
         den += np.where(have, weights[name], 0.0)
     ens = np.where(den > 0, num / np.maximum(den, 1e-9), 0.0)

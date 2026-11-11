@@ -28,3 +28,16 @@ def test_eight_team_bracket_fixed_no_reseed():
     assert sim._bracket(seeds, scores).tolist() == [1]
     scores[0, 2, 4] = 4
     assert sim._bracket(seeds, scores).tolist() == [4]
+
+
+def test_injury_hazard_hits_configured_missed_share():
+    from aniston.sim.season import MEAN_INJURY_WEEKS, onset_hazard
+    rng = np.random.default_rng(0)
+    for rate, n_weeks in [(0.11, 6), (0.06, 10)]:
+        q = onset_hazard(rate, n_weeks)
+        onset = rng.geometric(q, 400_000) - 1
+        dur = rng.geometric(1.0 / MEAN_INJURY_WEEKS, 400_000)
+        w = np.arange(n_weeks)[None, :]
+        hurt = (w >= onset[:, None]) & (w < (onset + dur)[:, None])
+        assert abs(hurt.mean() - rate) < 0.002
+    assert onset_hazard(0.0, 6) == 0.0

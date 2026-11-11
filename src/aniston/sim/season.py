@@ -22,6 +22,30 @@ MEAN_INJURY_WEEKS = 3.0
 CURRENT_WEEK_REMAINING_CV = 0.35
 
 
+def onset_hazard(rate: float, n_weeks: int, mean_weeks: float = MEAN_INJURY_WEEKS) -> float:
+    """Weekly injury-onset probability at which one spell (geometric onset, geometric duration with mean
+    `mean_weeks`) costs a currently healthy player `rate` of the next `n_weeks`. Everyone starts healthy, so
+    the naive rate / mean_weeks undershoots: about 2/3 of `rate` over six weeks."""
+    if rate <= 0 or n_weeks <= 0:
+        return 0.0
+    stay = 1.0 - 1.0 / mean_weeks  # P(a spell lasts another week)
+    t = np.arange(n_weeks)
+
+    def share(q: float) -> float:
+        # P(hurt in week t) = sum over onset k <= t of P(onset = k) * P(duration > t - k)
+        k = np.arange(n_weeks)
+        p = np.where(k[None, :] <= t[:, None], q * (1 - q) ** k[None, :] * stay ** (t[:, None] - k[None, :]), 0.0)
+        return float(p.sum(1).mean())
+
+    lo, hi = 0.0, 1.0
+    if share(hi) <= rate:  # a single spell can't miss that much; injure everyone at once
+        return 1.0
+    for _ in range(60):
+        mid = (lo + hi) / 2
+        lo, hi = (mid, hi) if share(mid) < rate else (lo, mid)
+    return (lo + hi) / 2
+
+
 @dataclass
 class SimResult:
     team_ids: list[int]
@@ -63,8 +87,8 @@ class Simulator:
 
         P = proj.players.height
         shock = np.clip(rng.normal(0.0, s.player_shock_sd, (self.S, P)), -0.8, 1.0)
-        rate = np.array([s.injury_rate.get(p, 0.0) for p in self.pos])
-        q = np.clip(rate / MEAN_INJURY_WEEKS, 1e-9, 1.0)
+        hazard = {p: onset_hazard(s.injury_rate.get(p, 0.0), self.W) for p in np.unique(self.pos)}
+        q = np.clip(np.array([hazard[p] for p in self.pos]), 1e-9, 1.0)
         onset = rng.geometric(q, (self.S, P)) - 1  # weeks from now until an injury starts
         dur = rng.geometric(1.0 / MEAN_INJURY_WEEKS, (self.S, P))
         w = np.arange(self.W)[None, :, None]

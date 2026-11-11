@@ -16,7 +16,21 @@ REPLACEMENT_FA_RANK = 2  # third-best free agent at the position looks like "wha
 
 
 def _espn_form(proj: Projections, current_week: int) -> pl.DataFrame:
-    ew = store.read("espn_weeks").filter((pl.col("week") <= current_week) & pl.col("actual").is_not_null())
+    """Season and last-3 points per game played. ESPN logs a 0 for weeks a player sat out, so only games he
+    actually played count (as in the ESPN app's average): nflverse has one row per completed player-game. K and
+    D/ST aren't in nflverse, so they count every completed week."""
+    ew = store.read("espn_weeks").filter(pl.col("actual").is_not_null())
+    kdst = proj.players.filter(pl.col("pos").is_in(["K", "D/ST"])).select("espn_id")
+    completed = ew.filter(pl.col("week") < current_week)
+    if store.has("usage"):
+        ids = store.read("ids").filter(pl.col("espn_id").is_not_null() & pl.col("gsis_id").is_not_null()).unique("gsis_id")
+        games = (store.read("usage").filter((pl.col("season") == settings().season) & (pl.col("week") <= current_week))
+                 .join(ids.select(pl.col("gsis_id").alias("player_id"), "espn_id"), on="player_id")
+                 .select("espn_id", pl.col("week").cast(ew["week"].dtype)).unique())
+        skill = ew.join(games, on=["espn_id", "week"], how="semi")
+    else:
+        skill = completed.join(kdst, on="espn_id", how="anti")
+    ew = pl.concat([skill, completed.join(kdst, on="espn_id", how="semi")])
     return (
         ew.sort("week")
         .group_by("espn_id")
