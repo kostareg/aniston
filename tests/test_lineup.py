@@ -33,3 +33,12 @@ def test_vectorized_matches_scalar():
             starters = spec.starters(vals[s, w], pos)
             assert np.isclose(total[s, w], vals[s, w][starters].sum())
     assert (var > 0).all()
+
+
+def test_narrow_flex_fills_before_op():
+    # ESPN lists OP before RB/WR/TE. Filling OP first would spend the spare RB there and leave FLEX empty.
+    spec = LineupSpec({"QB": 1, "RB": 1, "OP": 1, "RB/WR/TE": 1})
+    pos = np.array(["QB", "QB", "RB", "RB"])
+    pts = np.array([20, 15, 18, 16], dtype=float)
+    assert spec.evaluate(pts, pos) == 20 + 18 + 16 + 15
+    assert spec.starters(pts, pos).all()

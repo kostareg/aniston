@@ -53,11 +53,14 @@ def perceived_values(proj: Projections) -> pl.DataFrame:
     pick = p["league_pick"].fill_null(p["adp"]).fill_null(UNDRAFTED_PICK).to_numpy().astype(float)
 
     # Draft-cost curve: what a pick at this slot was "supposed" to score over a full season (ESPN preseason-ish
-    # season projection), fit on log(pick). Monotone by construction of the fit range.
+    # season projection), linear in log(pick). Later picks must be worth less, so a flat or rising fit falls back
+    # to the default curve.
     has = (p["adp"].fill_null(0).to_numpy() > 0) & (p["espn_season_proj"].to_numpy() > 0)
     x = np.log(np.clip(p["adp"].fill_null(UNDRAFTED_PICK).to_numpy()[has], 1, 300))
     y = p["espn_season_proj"].to_numpy()[has]
-    coef = np.polyfit(x, y, 1) if has.sum() > 20 else np.array([-40.0, 300.0])
+    coef = np.polyfit(x, y, 1) if has.sum() > 20 else None
+    if coef is None or coef[0] >= 0:
+        coef = np.array([-40.0, 300.0])
     season_games = 17.0
     adp_ros = np.clip(np.polyval(coef, np.log(np.clip(pick, 1, 300))), 0, None) * games_left / season_games
 

@@ -29,13 +29,15 @@ k[3].metric("P(they accept)", f"{t.p_accept * 100:.0f}%")
 k[4].metric("P(no veto)", f"{t.p_no_veto * 100:.0f}%")
 
 nm = lambda ids: ", ".join(ctx.names[i] for i in ids) or "–"  # noqa: E731
+pvsum = lambda ids: float(ctx.pvor[list(ids)].sum())  # noqa: E731
+my_pvor_gain = pvsum(t.get) - pvsum(t.give) + pvsum(t.my_moves["add"]) - pvsum(t.my_moves["drop"])
 st.markdown(
     f"""
 | | You | {ctx.teams[partner]} |
 |---|---|---|
 | ROS lineup points (consensus) | **{t.my_gain:+.0f}** | {t.their_true_gain:+.0f} |
 | ROS lineup points as ESPN shows them | – | **{t.their_seen_gain:+.0f}** |
-| Perceived value received − given | {-t.their_pvor_gain:+.0f} | {t.their_pvor_gain:+.0f} |
+| Perceived value gained, incl. roster moves | {my_pvor_gain:+.0f} | {t.their_pvor_gain:+.0f} |
 | Roster moves after the trade | add {nm(t.my_moves['add'])}; drop {nm(t.my_moves['drop'])} | add {nm(t.their_moves['add'])}; drop {nm(t.their_moves['drop'])} |
 | Δ title odds | **{t.d_title * 100:+.1f} pts** | {t.partner_d_title * 100:+.1f} pts |
 """

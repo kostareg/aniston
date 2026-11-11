@@ -5,7 +5,6 @@ using only games before it (with that week's ESPN projection as its prior), so n
 """
 import numpy as np
 import polars as pl
-from scipy.optimize import nnls
 
 from aniston import store
 from aniston.config import settings
@@ -35,7 +34,8 @@ def run(min_week: int = 2) -> dict:
         use = _usage_projection(week, s.season, ids)
         base = base.join(use, on="espn_id", how="left").with_columns(
             pl.when(pl.col("g").is_null()).then(pl.col("espn_proj")).otherwise(
-                (pl.col("g") * (XFP_WEIGHT * pl.col("xfp").fill_null(pl.col("fp")) + (1 - XFP_WEIGHT) * pl.col("fp"))
+                (pl.col("g") * (XFP_WEIGHT * pl.col("xfp").fill_null(pl.col("fp"))
+                                + (1 - XFP_WEIGHT) * pl.col("fp").fill_null(pl.col("xfp")))
                  + USAGE_PRIOR_GAMES * pl.col("espn_proj")) / (pl.col("g") + USAGE_PRIOR_GAMES)
             ).alias("usage_proj"))
         frames.append(base)
@@ -45,9 +45,10 @@ def run(min_week: int = 2) -> dict:
     X = df.select("espn_proj", "sleeper_proj", "usage_proj").to_numpy()
     ens_w = np.array([s.w_espn, s.w_sleeper, s.w_usage])
     current = X @ (ens_w / ens_w.sum())
-    w_fit, _ = nnls(X, y)
-    fitted = w_fit / w_fit.sum() if w_fit.sum() > 0 else ens_w
     mae = lambda pred: float(np.mean(np.abs(pred - y)))  # noqa: E731
+    # Best blend the ensemble could use: weights summing to 1 (as it renormalizes), scored by MAE, on a 0.01 grid.
+    grid = np.array([(a, b, 100 - a - b) for a in range(101) for b in range(101 - a)]) / 100
+    fitted = grid[np.abs(X @ grid.T - y[:, None]).mean(0).argmin()]
     by_pos = (df.with_columns(pl.Series("ensemble", current))
               .group_by("pos").agg(*(( (pl.col(c) - pl.col("actual")).abs().mean().alias(c))
                                      for c in ("espn_proj", "sleeper_proj", "usage_proj", "ensemble")),
@@ -58,7 +59,6 @@ def run(min_week: int = 2) -> dict:
         "mae": {"espn": mae(X[:, 0]), "sleeper": mae(X[:, 1]), "usage": mae(X[:, 2]),
                 "ensemble_current": mae(current), "ensemble_fitted": mae(X @ fitted)},
         "fitted_weights": {"espn": float(fitted[0]), "sleeper": float(fitted[1]), "usage": float(fitted[2])},
-        "fitted_scale": float(w_fit.sum()),
     }
     store.write("backtest_by_pos", by_pos)
     store.put_json("backtest", result)

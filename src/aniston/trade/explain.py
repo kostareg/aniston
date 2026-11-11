@@ -16,8 +16,9 @@ def _player_notes(ctx, i: int) -> list[str]:
         notes.append(f"recent spike ({pv['last3']:.1f} last 3 vs {pv['ppg']:.1f} season)")
     if p["injury_status"] not in ("ACTIVE", "NORMAL", None):
         notes.append(f"status {p['injury_status']}")
-    if pv["league_pick"] is not None and pv["league_pick"] <= 36:
-        notes.append(f"round-{int((pv['league_pick'] - 1) // 12) + 1} draft cost")
+    n_teams = len(ctx.teams)
+    if pv["league_pick"] is not None and pv["league_pick"] <= 3 * n_teams:
+        notes.append(f"round-{int((pv['league_pick'] - 1) // n_teams) + 1} draft cost")
     return notes
 
 

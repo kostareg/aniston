@@ -1,8 +1,8 @@
 """Optimal lineup selection, vectorized over any leading axes (sims, weeks).
 
 Dedicated slots take the best players at their position, then flex slots take the best leftovers from
-their eligible positions. Greedy is optimal here because every flex slot's eligible set contains the
-dedicated positions it competes with (RB/WR/TE, OP, ...).
+their eligible positions, narrowest flex first (RB/WR/TE before OP). Greedy is optimal when flex eligible sets
+are nested, as in every common ESPN setup; overlapping-but-unnested pairs (RB/WR with WR/TE) can be off.
 """
 import numpy as np
 
@@ -17,7 +17,8 @@ FLEX_ELIGIBLE = {
 class LineupSpec:
     def __init__(self, slots: dict[str, int], cv: dict[str, float] | None = None):
         self.dedicated = {p: n for p, n in slots.items() if p not in FLEX_ELIGIBLE}
-        self.flex = [(FLEX_ELIGIBLE[p], n) for p, n in slots.items() if p in FLEX_ELIGIBLE]
+        self.flex = sorted(((FLEX_ELIGIBLE[p], n) for p, n in slots.items() if p in FLEX_ELIGIBLE),
+                           key=lambda f: len(f[0]))
         self.cv = cv or {}
 
     def evaluate(self, values: np.ndarray, pos: np.ndarray, with_var: bool = False):

@@ -107,9 +107,11 @@ class TradeContext:
         t.my_moves, t.their_moves = {"drop": d1, "add": a1}, {"drop": d2, "add": a2}
         t.their_true_gain = self.true.value(t.their_roster) - self.true.value(self.base[partner])
         t.their_seen_gain = self.seen.value(t.their_roster) - self.seen.value(self.base[partner])
-        t.their_pvor_gain = float(self.pvor[list(give)].sum() - self.pvor[list(get)].sum())
+        trade_pvor = float(self.pvor[list(give)].sum() - self.pvor[list(get)].sum())
+        # The partner counts the player they must cut (and any pickup); the league votes on the trade alone.
+        t.their_pvor_gain = trade_pvor + float(self.pvor[a2].sum() - self.pvor[d2].sum())
         t.p_accept = p_accept(t.their_seen_gain, t.their_pvor_gain, partner in self.has_traded)
-        t.p_no_veto = p_no_veto(-t.their_pvor_gain)
+        t.p_no_veto = p_no_veto(-trade_pvor)
         t.proxy = t.my_gain * t.p_accept * t.p_no_veto
         return t
 

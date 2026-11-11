@@ -17,8 +17,11 @@ season = load("players").select("espn_id", "espn_season_actual")
 d = (draft.join(season, on="espn_id", how="left").join(pm, on="espn_id", how="left")
      .with_columns(pl.col("espn_season_actual").fill_null(0), pl.col("ens_ros").fill_null(0))
      .with_columns((pl.col("espn_season_actual") + pl.col("ens_ros")).alias("season_value")))
-# Expected season value for a pick slot = average of the 12 picks around it.
-d = d.sort("overall").with_columns(pl.col("season_value").rolling_mean(12, center=True, min_samples=4).alias("slot_avg"))
+# Expected season value for a pick slot = average of the 12 picks around it (6 each side, not the pick itself).
+win = dict(window_size=13, center=True, min_samples=5)
+d = d.sort("overall").with_columns(
+    ((pl.col("season_value").rolling_sum(**win) - pl.col("season_value"))
+     / (pl.col("season_value").is_not_null().cast(pl.Float64).rolling_sum(**win) - 1)).alias("slot_avg"))
 d = d.with_columns((pl.col("season_value") - pl.col("slot_avg")).alias("vs_slot"))
 
 st.subheader("Draft value: points so far + projected rest of season, by pick")

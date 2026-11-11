@@ -116,7 +116,8 @@ def build(fa_per_pos: int = 15, through_week: int | None = None) -> Projections:
     g = universe["games"].fill_null(0).to_numpy().astype(float)
     xfp = universe["xfp_pg"].fill_null(np.nan).to_numpy().astype(float)
     fp = universe["fp_pg"].fill_null(np.nan).to_numpy().astype(float)
-    obs = np.where(np.isnan(xfp), fp, XFP_WEIGHT * xfp + (1 - XFP_WEIGHT) * np.nan_to_num(fp, nan=0.0))
+    # Blend xFP and actual FP per game; when only one exists, use it alone.
+    obs = np.where(np.isnan(xfp), fp, np.where(np.isnan(fp), xfp, XFP_WEIGHT * xfp + (1 - XFP_WEIGHT) * fp))
     usage_rate = np.where(np.isnan(obs), src_rate, (g * np.nan_to_num(obs) + USAGE_PRIOR_GAMES * src_rate) / (g + USAGE_PRIOR_GAMES))
     # Weeks ESPN has the player out get no usage projection: a 0 here would just repeat ESPN's vote.
     usage = np.where(plays, usage_rate[:, None], np.nan)
