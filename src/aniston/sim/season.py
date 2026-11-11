@@ -143,7 +143,7 @@ class Simulator:
         for k in range(self.n_playoff):
             seed_dist[:, k] = (rank == k).mean(0)
         seed_dist[:, -1] = (rank >= self.n_playoff).mean(0)
-        n_byes = 2 if self.n_playoff == 6 else 0
+        n_byes = {6: 2}.get(self.n_playoff, 0)
         return SimResult(
             team_ids=self.team_ids,
             p_playoffs=1 - seed_dist[:, -1],
@@ -155,7 +155,8 @@ class Simulator:
         )
 
     def _bracket(self, seeds: np.ndarray, scores: np.ndarray) -> np.ndarray:
-        """Single-week rounds over the playoff weeks; fixed bracket (1 vs 4/5 winner, 2 vs 3/6 winner)."""
+        """Single-week rounds over the playoff weeks; fixed bracket, no reseeding (8 teams: 1/8 vs 4/5, 2/7 vs 3/6;
+        6 teams: 1 vs 4/5 winner, 2 vs 3/6 winner)."""
         S = seeds.shape[0]
         rows = np.arange(S)
         pw = [self.weeks.index(w) for w in range(self.reg_last + 1, self.meta["last_week"] + 1)]
@@ -163,6 +164,14 @@ class Simulator:
         def game(a, b, w):
             return np.where(scores[rows, w, a] >= scores[rows, w, b], a, b)
 
+        if self.n_playoff == 8 and len(pw) == 3:
+            q18 = game(seeds[:, 0], seeds[:, 7], pw[0])
+            q45 = game(seeds[:, 3], seeds[:, 4], pw[0])
+            q27 = game(seeds[:, 1], seeds[:, 6], pw[0])
+            q36 = game(seeds[:, 2], seeds[:, 5], pw[0])
+            f1 = game(q18, q45, pw[1])
+            f2 = game(q27, q36, pw[1])
+            return game(f1, f2, pw[2])
         if self.n_playoff == 6 and len(pw) == 3:
             w45 = game(seeds[:, 3], seeds[:, 4], pw[0])
             w36 = game(seeds[:, 2], seeds[:, 5], pw[0])

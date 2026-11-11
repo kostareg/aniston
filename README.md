@@ -59,7 +59,7 @@ Cloudflare Tunnel + Access (or a reverse proxy with auth). To expose it directly
 | | `model/lineup.py` | Optimal lineup (QB/2RB/2WR/TE/FLEX/D/K), vectorized over sims and weeks |
 | | `model/variance.py` | Weekly volatility by position fitted on last season |
 | | `model/signals.py` | Luck (points vs xFP), usage trends, ESPN-vs-consensus gap, schedule strength (ROS + playoff weeks), buy-low/sell-high |
-| Sim | `sim/season.py` | 5,000 seasons: per-player projection error, injury spells, team drift, weekly score noise → standings → seeding (points tiebreak) → 6-team bracket. Common random numbers make trade deltas precise |
+| Sim | `sim/season.py` | 5,000 seasons: per-player projection error, injury spells, team drift, weekly score noise → standings → seeding (points tiebreak) → 8-team bracket. Common random numbers make trade deltas precise |
 | Trades | `trade/perceived.py` | Perceived value = ESPN ROS, season PPG, last-3 PPG and draft cost, scaled to games left |
 | | `trade/roster.py` | Roster limits, IR, drops (partners drop by perceived value), best free-agent pickup |
 | | `trade/acceptance.py` | P(accept) from their **ESPN-visible** lineup gain + perceived value; P(no veto) from how lopsided it looks |
