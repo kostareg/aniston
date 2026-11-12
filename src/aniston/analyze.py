@@ -10,17 +10,20 @@ from aniston.trade.engine import TradeContext
 
 
 def team_position_strength(ctx: TradeContext) -> pl.DataFrame:
-    """Average weekly starting points each team gets from each lineup position (consensus projections)."""
+    """Average weekly points each team gets from each lineup slot (consensus projections). Flex slots are their own
+    rows, so a team starting a third RB at flex doesn't look strong at RB and weak at WR next to teams flexing a WR."""
     rows = []
     spec = ctx.sim.spec
+    slot_names = list(spec.dedicated) + [spec.flex_names[e] for e, _ in spec.flex]
     for t, roster in ctx.base.items():
         r = np.array(roster)
         mat = ctx.proj.ens[r].T  # (W, n)
-        starters = np.zeros(len(r))
+        pts = dict.fromkeys(slot_names, 0.0)
         for w in range(mat.shape[0]):
-            starters += spec.starters(mat[w], ctx.pos[r]) * mat[w]
-        for q in np.unique(ctx.pos[r]):
-            rows.append({"team_id": t, "pos": q, "pts_per_week": float(starters[ctx.pos[r] == q].sum() / mat.shape[0])})
+            for slot, v in zip(spec.slots(mat[w], ctx.pos[r]), mat[w]):
+                if slot:
+                    pts[slot] += v
+        rows += [{"team_id": t, "pos": q, "pts_per_week": v / mat.shape[0]} for q, v in pts.items()]
     df = pl.DataFrame(rows)
     return df.with_columns((pl.col("pts_per_week") - pl.col("pts_per_week").mean().over("pos")).alias("vs_avg"))
 

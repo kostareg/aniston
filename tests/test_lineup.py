@@ -42,3 +42,10 @@ def test_narrow_flex_fills_before_op():
     pts = np.array([20, 15, 18, 16], dtype=float)
     assert spec.evaluate(pts, pos) == 20 + 18 + 16 + 15
     assert spec.starters(pts, pos).all()
+
+
+def test_slots_label_flex_separately():
+    spec = LineupSpec(SLOTS)
+    pos = np.array(["QB", "RB", "RB", "RB", "WR", "WR", "WR", "TE", "TE", "D/ST", "K"])
+    pts = np.array([20, 15, 14, 13, 12, 11, 9, 8, 10.5, 6, 7], dtype=float)
+    assert spec.slots(pts, pos).tolist() == ["QB", "RB", "RB", "RB/WR/TE", "WR", "WR", "", "", "TE", "D/ST", "K"]

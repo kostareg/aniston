@@ -56,13 +56,16 @@ def usage_table(season: int, through_week: int) -> pl.DataFrame:
 
 @dataclass
 class Projections:
-    """Dense matrices over the player universe for the future weeks."""
+    """Dense matrices over the player universe for the future weeks, plus the current week on its own (the season
+    simulation takes the current week from ESPN's live team scores; the current week's column is for lineup advice)."""
 
     weeks: list[int]  # future weeks, e.g. [7..16]
     players: pl.DataFrame  # one row per universe player, row order == matrix row order
     ens: np.ndarray  # (P, W) ensemble projection
     espn: np.ndarray  # (P, W) ESPN projection (what other managers see)
     sources: dict[str, np.ndarray]  # per-source matrices with NaN where missing
+    cur_week: int
+    ens_cur: np.ndarray  # (P,) ensemble projection for the current week
 
     def idx(self) -> dict[int, int]:
         return {pid: i for i, pid in enumerate(self.players["espn_id"].to_list())}
@@ -77,11 +80,12 @@ def build(fa_per_pos: int = 15, through_week: int | None = None) -> Projections:
     through_week = through_week if through_week is not None else cur
 
     players = store.read("players")
-    ew = store.read("espn_weeks").filter(pl.col("week").is_in(weeks))
+    cols = [cur] + weeks  # matrix columns: the current week, then the future weeks
+    ew = store.read("espn_weeks").filter(pl.col("week").is_in(cols))
     ids = store.read("ids").filter(pl.col("espn_id").is_not_null()).unique("espn_id").select("espn_id", "sleeper_id")
-    sw = store.read("sleeper_weeks").filter(pl.col("week").is_in(weeks)) if store.has("sleeper_weeks") else None
+    sw = store.read("sleeper_weeks").filter(pl.col("week").is_in(cols)) if store.has("sleeper_weeks") else None
 
-    espn_ros = ew.group_by("espn_id").agg(pl.col("espn_proj").sum().alias("espn_ros"))
+    espn_ros = ew.filter(pl.col("week").is_in(weeks)).group_by("espn_id").agg(pl.col("espn_proj").sum().alias("espn_ros"))
     players = players.join(espn_ros, on="espn_id", how="left").with_columns(pl.col("espn_ros").fill_null(0.0))
     rostered = players.filter(pl.col("fantasy_team_id") > 0)
     fas = (players.filter(pl.col("fantasy_team_id") == 0)
@@ -90,8 +94,8 @@ def build(fa_per_pos: int = 15, through_week: int | None = None) -> Projections:
     usage = usage_table(s.season, through_week)
     universe = universe.join(usage, on="espn_id", how="left")
 
-    P, W = universe.height, len(weeks)
-    widx = {w: j for j, w in enumerate(weeks)}
+    P, W = universe.height, len(cols)
+    widx = {w: j for j, w in enumerate(cols)}
     pidx = {pid: i for i, pid in enumerate(universe["espn_id"].to_list())}
 
     def dense(df: pl.DataFrame, key: str, col: str, keymap: dict) -> np.ndarray:
@@ -112,7 +116,8 @@ def build(fa_per_pos: int = 15, through_week: int | None = None) -> Projections:
     # Usage model: per-game rate from xFP and actual FP, shrunk toward the projection sources' ROS rate,
     # spread over the weeks where the player is expected to play (ESPN shows > 0).
     plays = espn > 0
-    src_rate = np.where(plays.sum(1) > 0, espn.sum(1) / np.maximum(plays.sum(1), 1), 0.0)
+    n_ros = plays[:, 1:].sum(1)
+    src_rate = np.where(n_ros > 0, espn[:, 1:].sum(1) / np.maximum(n_ros, 1), 0.0)
     g = universe["games"].fill_null(0).to_numpy().astype(float)
     xfp = universe["xfp_pg"].fill_null(np.nan).to_numpy().astype(float)
     fp = universe["fp_pg"].fill_null(np.nan).to_numpy().astype(float)
@@ -138,7 +143,8 @@ def build(fa_per_pos: int = 15, through_week: int | None = None) -> Projections:
     ens = np.where(plays | (np.nan_to_num(sources.get("sleeper", np.zeros_like(espn))) > 0), ens, 0.0)
 
     universe = universe.with_columns(
-        pl.Series("ens_ros", ens.sum(1)),
+        pl.Series("ens_ros", ens[:, 1:].sum(1)),
         pl.Series("usage_rate", usage_rate),
     )
-    return Projections(weeks=weeks, players=universe, ens=ens, espn=espn, sources=sources)
+    return Projections(weeks=weeks, players=universe, ens=ens[:, 1:], espn=espn[:, 1:],
+                       sources={k: v[:, 1:] for k, v in sources.items()}, cur_week=cur, ens_cur=ens[:, 0])

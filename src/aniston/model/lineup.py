@@ -19,6 +19,7 @@ class LineupSpec:
         self.dedicated = {p: n for p, n in slots.items() if p not in FLEX_ELIGIBLE}
         self.flex = sorted(((FLEX_ELIGIBLE[p], n) for p, n in slots.items() if p in FLEX_ELIGIBLE),
                            key=lambda f: len(f[0]))
+        self.flex_names = {FLEX_ELIGIBLE[p]: p for p in slots if p in FLEX_ELIGIBLE}
         self.cv = cv or {}
 
     def evaluate(self, values: np.ndarray, pos: np.ndarray, with_var: bool = False):
@@ -64,17 +65,20 @@ class LineupSpec:
 
     def starters(self, values: np.ndarray, pos: np.ndarray) -> np.ndarray:
         """Boolean mask (n,) of starters for a single 1-D roster projection."""
-        n_players = values.shape[-1]
-        mask = np.zeros(n_players, dtype=bool)
+        return self.slots(values, pos) != ""
+
+    def slots(self, values: np.ndarray, pos: np.ndarray) -> np.ndarray:
+        """Lineup slot (n,) each player fills for a single 1-D roster projection, e.g. "RB" or "RB/WR/TE"; "" = bench."""
+        out = np.full(values.shape[-1], "", dtype=object)
         idx_by_pos = {p: np.where(pos == p)[0] for p in set(pos)}
         left: dict[str, list[int]] = {}
         for p, n in self.dedicated.items():
             ids = sorted(idx_by_pos.get(p, []), key=lambda i: -values[i])
-            mask[ids[:n]] = True
+            out[ids[:n]] = p
             left[p] = ids[n:]
         for eligible, n in self.flex:
             pool = sorted((i for p in eligible for i in left.get(p, [])), key=lambda i: -values[i])[:n]
-            mask[pool] = True
+            out[pool] = self.flex_names[eligible]
             for p in eligible:
                 left[p] = [i for i in left.get(p, []) if i not in pool]
-        return mask
+        return out

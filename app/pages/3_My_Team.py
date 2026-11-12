@@ -13,20 +13,20 @@ if not ready():
 m = meta()
 me = m["my_team_id"]
 pm = load("player_model")
-pw = load("projection_weeks")
-next_week = m["current_week"] + 1
 
 ctx = trade_context()
 roster = list(ctx.base[me])
-j = ctx.proj.weeks.index(next_week)
-starters = ctx.sim.spec.starters(ctx.proj.ens[roster, j], ctx.pos[roster])
-start_ids = {int(ctx.players["espn_id"][i]) for i, s in zip(roster, starters) if s}
+# The lineup to set is the current week's: ESPN moves on to the next week once one is final.
+lineup_week, week_proj = ctx.proj.cur_week, ctx.proj.ens_cur
+starters = ctx.sim.spec.starters(week_proj[roster], ctx.pos[roster])
+ids = [int(ctx.players["espn_id"][i]) for i in roster]
+start_ids = {e for e, s in zip(ids, starters) if s}
 
-mine = pm.filter(pl.col("espn_id").is_in([int(ctx.players["espn_id"][i]) for i in roster]))
-nw = pw.filter(pl.col("week") == next_week).select("espn_id", pl.col("ens").alias("next_week"))
-mine = mine.join(nw, on="espn_id", how="left").with_columns(pl.col("espn_id").is_in(list(start_ids)).alias("start"))
+mine = pm.filter(pl.col("espn_id").is_in(ids))
+wk = pl.DataFrame({"espn_id": ids, "next_week": week_proj[roster]})
+mine = mine.join(wk, on="espn_id", how="left").with_columns(pl.col("espn_id").is_in(list(start_ids)).alias("start"))
 
-st.subheader(f"Optimal lineup for week {next_week}")
+st.subheader(f"Optimal lineup for week {lineup_week}")
 order = {"QB": 0, "RB": 1, "WR": 2, "TE": 3, "D/ST": 4, "K": 5}
 lineup = mine.sort(["start", pl.col("pos").replace_strict(order, default=9), "next_week"], descending=[True, False, True])
 st.dataframe(
@@ -36,7 +36,7 @@ st.dataframe(
     column_config={
         "start": st.column_config.CheckboxColumn("Start"), "name": "Player", "pos": "Pos", "pro_team": "NFL",
         "injury_status": "Status",
-        "next_week": st.column_config.NumberColumn(f"Wk {next_week} proj", format="%.1f"),
+        "next_week": st.column_config.NumberColumn(f"Wk {lineup_week} proj", format="%.1f"),
         "ens_ros": st.column_config.NumberColumn("ROS (consensus)", format="%.0f"),
         "espn_ros": st.column_config.NumberColumn("ROS (ESPN)", format="%.0f"),
         "vorp": st.column_config.NumberColumn("ROS over replacement", format="%+.0f"),
@@ -48,12 +48,12 @@ st.dataframe(
 )
 
 st.subheader("Positional strength vs the league")
-st.caption("Average weekly starting points each team gets from each position (consensus ROS), relative to the league "
-           "average. Red = below average, blue = above.")
+st.caption("Average weekly points each team gets from each lineup slot (consensus ROS), relative to the league "
+           "average; flex slots are their own column. Red = below average, blue = above.")
 ts = load("team_strength").filter(~pl.col("pos").is_in(["K", "D/ST"]))
 names = team_names()
 piv = ts.pivot(on="pos", index="team_id", values="vs_avg").fill_null(0)
-pos_cols = [p for p in ["QB", "RB", "WR", "TE"] if p in piv.columns]
+pos_cols = [p for p in ["QB", "RB", "WR", "TE"] if p in piv.columns] + sorted(c for c in piv.columns if "/" in c or c == "OP")
 piv = piv.with_columns(pl.sum_horizontal(pos_cols).alias("total")).sort("total", descending=True)
 z = piv.select(pos_cols).to_numpy()
 lim = float(np.abs(z).max()) or 1
