@@ -7,6 +7,7 @@ the difference between "with trade" and "without trade" is not swamped by sampli
   * per team-week score noise scaled by the starting lineup's variance.
 Each team starts its optimal lineup every week from whoever is available.
 """
+import math
 from dataclasses import dataclass
 
 import numpy as np
@@ -19,7 +20,13 @@ from aniston.model.projections import Projections
 from aniston.model.variance import position_cv
 
 MEAN_INJURY_WEEKS = 3.0
-CURRENT_WEEK_REMAINING_CV = 0.35
+CURRENT_WEEK_TEAM_CV = 0.22  # full-week team score SD / mean: the simulated future weeks and this season's actual spread
+
+
+def remaining_sd(projected: float, score: float) -> float:
+    """SD of the points a team has still to score this week. Independent player outcomes make it grow like the
+    square root of the points left: a full week gives the team CV, one 12-point player left about his own CV."""
+    return CURRENT_WEEK_TEAM_CV * math.sqrt(max(projected - score, 0.0) * max(projected, 0.0))
 
 
 def onset_hazard(rate: float, n_weeks: int, mean_weeks: float = MEAN_INJURY_WEEKS) -> float:
@@ -120,7 +127,7 @@ class Simulator:
             for t, o, score, proj in live.select("team_id", "opp_id", "live_score", "live_projected").iter_rows():
                 i = self.tix[t]
                 self.cur_mean[i] = proj
-                self.cur_sd[i] = CURRENT_WEEK_REMAINING_CV * max(proj - score, 0.0)
+                self.cur_sd[i] = remaining_sd(proj, score)
                 key = tuple(sorted((t, o)))
                 if key not in seen:
                     seen.add(key)

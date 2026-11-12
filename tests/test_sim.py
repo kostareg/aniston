@@ -41,3 +41,20 @@ def test_injury_hazard_hits_configured_missed_share():
         hurt = (w >= onset[:, None]) & (w < (onset + dur)[:, None])
         assert abs(hurt.mean() - rate) < 0.002
     assert onset_hazard(0.0, 6) == 0.0
+
+
+def test_legalize_keeps_ir_player_instead_of_double_dropping():
+    # Cutting the OUT player (lowest value) would free no active spot and force a second, healthy drop.
+    spec = LineupSpec({"RB": 1})
+    mat = np.array([[10.0], [8.0], [6.0], [0.0], [9.0]])
+    injury = np.array(["ACTIVE", "ACTIVE", "ACTIVE", "OUT", "ACTIVE"])
+    v = RosterValuer(mat, np.array(["RB"] * 5), injury, spec, weeks=[11], reg_last=13, active_cap=3, ir_slots=1)
+    roster, dropped, _ = v.legalize((0, 1, 2, 3, 4), [])
+    assert dropped == [2] and roster == (0, 1, 3, 4)
+
+
+def test_remaining_sd_scales_with_sqrt_of_points_left():
+    from aniston.sim.season import CURRENT_WEEK_TEAM_CV, remaining_sd
+    assert np.isclose(remaining_sd(120.0, 0.0), CURRENT_WEEK_TEAM_CV * 120)
+    assert np.isclose(remaining_sd(120.0, 90.0), CURRENT_WEEK_TEAM_CV * 60)
+    assert remaining_sd(120.0, 130.0) == 0.0

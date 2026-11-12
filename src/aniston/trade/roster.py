@@ -32,12 +32,15 @@ class RosterValuer:
         return self.active_cap + min(self.ir_slots, int(self.ir_ok[list(roster)].sum()))
 
     def drop_candidate(self, roster: tuple[int, ...], protected: set[int] = frozenset()) -> int:
-        """Least valuable droppable player: lowest keep score at a position held beyond its starting requirement."""
+        """Least valuable droppable player: lowest keep score at a position held beyond its starting requirement.
+        Players filling IR slots are skipped: cutting one frees no active spot, so it would just force another drop."""
         counts: dict[str, int] = {}
         for i in roster:
             counts[self.pos[i]] = counts.get(self.pos[i], 0) + 1
-        choices = [i for i in roster if i not in protected and counts[self.pos[i]] > self.min_count.get(self.pos[i], 0)]
-        return min(choices or [i for i in roster if i not in protected], key=lambda i: self.keep_score[i])
+        on_ir = set(sorted((i for i in roster if self.ir_ok[i]), key=lambda i: -self.keep_score[i])[: self.ir_slots])
+        pool = [i for i in roster if i not in protected and i not in on_ir]
+        choices = [i for i in pool if counts[self.pos[i]] > self.min_count.get(self.pos[i], 0)]
+        return min(choices or pool or [i for i in roster if i not in protected], key=lambda i: self.keep_score[i])
 
     def shortlist(self, free_agents: list[int], per_pos: int = 3) -> list[int]:
         """Top free agents per position by this valuer's ROS points; deeper options never win a pickup."""

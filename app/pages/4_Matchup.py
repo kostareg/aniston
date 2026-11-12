@@ -3,6 +3,7 @@ import math
 import polars as pl
 import streamlit as st
 
+from aniston.sim.season import remaining_sd
 from aniston.ui import load, meta, page, ready, team_names, trade_context
 
 page("Matchup", "🆚")
@@ -26,7 +27,7 @@ row = live.filter(pl.col("team_id") == me)
 if row.height:
     r = row.row(0, named=True)
     o = live.filter(pl.col("team_id") == r["opp_id"]).row(0, named=True)
-    sd = lambda x: 0.35 * max(x["live_projected"] - x["live_score"], 0)  # noqa: E731
+    sd = lambda x: remaining_sd(x["live_projected"], x["live_score"])  # noqa: E731
     p = win_prob(r["live_projected"], sd(r), o["live_projected"], sd(o))
     st.subheader(f"Week {m['current_week']} (live): you vs {names[r['opp_id']]}")
     c = st.columns(3)
