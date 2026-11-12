@@ -55,9 +55,9 @@ st.dataframe(
 st.caption("Pts/g vs expected uses nflverse expected fantasy points (usage-based): big positive gaps tend to regress. "
            "SoS > 1 means softer opponents for that position.")
 
-choice = st.selectbox("Player detail", v["name"].to_list())
-if choice:
-    pid = v.filter(pl.col("name") == choice)["espn_id"][0]
+detail = {e: f"{n} ({q}, {t})" for e, n, q, t in v.select("espn_id", "name", "pos", "pro_team").iter_rows()}
+pid = st.selectbox("Player detail", list(detail), format_func=detail.get)  # by id: names are not unique
+if pid is not None:
     pw = load("projection_weeks").filter(pl.col("espn_id") == pid).sort("week")
     act = load("espn_weeks").filter((pl.col("espn_id") == pid) & pl.col("actual").is_not_null()).sort("week")
     fig = go.Figure()

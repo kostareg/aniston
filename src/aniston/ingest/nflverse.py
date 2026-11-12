@@ -1,4 +1,4 @@
-"""nflverse data: weekly player stats/usage, expected fantasy points, ID map, schedules, ECR."""
+"""nflverse data: weekly player stats/usage, expected fantasy points, ID map, schedules."""
 import nflreadpy as nfl
 import polars as pl
 
@@ -28,9 +28,4 @@ def weekly_usage(seasons: list[int], scoring: dict[str, float]) -> pl.DataFrame:
 
 def schedules(season: int) -> pl.DataFrame:
     return nfl.load_schedules([season]).filter(pl.col("game_type") == "REG").select(
-        "week", "home_team", "away_team", "home_score", "away_score")
-
-
-def ecr_weekly() -> pl.DataFrame:
-    rk = nfl.load_ff_rankings("week")
-    return rk.select(pl.col("fantasypros_id").cast(pl.Utf8), "player_name", "pos", "ecr", "sd", "scrape_date")
+        "week", "gameday", "gametime", "home_team", "away_team", "home_score", "away_score")

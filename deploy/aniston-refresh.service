@@ -7,3 +7,6 @@ Type=oneshot
 WorkingDirectory=%h/Projects/aniston
 ExecStart=/run/current-system/sw/bin/nix develop %h/Projects/aniston -c uv run aniston refresh
 ExecStart=/run/current-system/sw/bin/nix develop %h/Projects/aniston -c uv run aniston analyze
+# Sends to NOTIFY_URL from .env (ntfy topic or Discord webhook); only prints when that is unset. "-" = a failed
+# send does not fail the refresh.
+ExecStart=-/run/current-system/sw/bin/nix develop %h/Projects/aniston -c uv run aniston digest

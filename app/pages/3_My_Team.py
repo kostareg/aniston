@@ -3,7 +3,8 @@ import plotly.graph_objects as go
 import polars as pl
 import streamlit as st
 
-from aniston.ui import DIVERGING, load, meta, page, ready, team_names, trade_context
+from aniston import store
+from aniston.ui import DIVERGING, load, load_opt, meta, page, ready, team_names, trade_context
 
 page("My Team", "🧢")
 st.title("My Team")
@@ -46,6 +47,24 @@ st.dataframe(
         "sos_playoffs": st.column_config.NumberColumn("SoS playoffs", format="%.2f"),
     },
 )
+
+swaps, info = load_opt("start_sit"), store.get_json("lineup_info") or {}
+if swaps is not None and info.get("win_prob") is not None and info.get("week") == lineup_week:
+    st.subheader("Start/sit against this week's opponent")
+    edge = info["my_mean"] - info["opp_mean"]
+    role = "favourite" if edge > 0 else "underdog"
+    st.caption(f"Versus {team_names().get(info['opp_id'], '?')}: {info['my_mean']:.0f} to {info['opp_mean']:.0f} "
+               f"projected at both sides' best lineups, {info['win_prob'] * 100:.0f}% to win. As the {role} you want "
+               f"{'less' if edge > 0 else 'more'} volatility, so a swap can be right even when it costs projected "
+               "points. Volatility is each player's own week-to-week spread this season, shrunk toward his position's.")
+    if swaps.height:
+        st.dataframe(swaps.with_columns(pl.col("d_win") * 100), hide_index=True, width="stretch", column_config={
+            "sit": "Sit", "start": "Start", "slot": "Slot",
+            "d_proj": st.column_config.NumberColumn("Δ projected pts", format="%+.1f"),
+            "d_sd": st.column_config.NumberColumn("Δ volatility (SD)", format="%+.1f"),
+            "d_win": st.column_config.NumberColumn("Δ win probability (pts)", format="%+.1f")})
+    else:
+        st.write("No swap beats the points-optimal lineup above by 0.2 points of win probability or more.")
 
 st.subheader("Positional strength vs the league")
 st.caption("Average weekly points each team gets from each lineup slot (consensus ROS), relative to the league "

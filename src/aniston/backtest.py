@@ -46,9 +46,12 @@ def run(min_week: int = 2) -> dict:
     ens_w = np.array([s.w_espn, s.w_sleeper, s.w_usage])
     current = X @ (ens_w / ens_w.sum())
     mae = lambda pred: float(np.mean(np.abs(pred - y)))  # noqa: E731
-    # Best blend the ensemble could use: weights summing to 1 (as it renormalizes), scored by MAE, on a 0.01 grid.
+    rmse = lambda pred: float(np.sqrt(np.mean((pred - y) ** 2)))  # noqa: E731
+    # Best blend the ensemble could use: weights summing to 1 (as it renormalizes), on a 0.01 grid. Scored by
+    # squared error: the blend stands in for a mean (it is summed into lineups), and absolute error would fit
+    # the median instead, which sits lower for right-skewed fantasy scores.
     grid = np.array([(a, b, 100 - a - b) for a in range(101) for b in range(101 - a)]) / 100
-    fitted = grid[np.abs(X @ grid.T - y[:, None]).mean(0).argmin()]
+    fitted = grid[((X @ grid.T - y[:, None]) ** 2).mean(0).argmin()]
     by_pos = (df.with_columns(pl.Series("ensemble", current))
               .group_by("pos").agg(*(( (pl.col(c) - pl.col("actual")).abs().mean().alias(c))
                                      for c in ("espn_proj", "sleeper_proj", "usage_proj", "ensemble")),
@@ -58,8 +61,58 @@ def run(min_week: int = 2) -> dict:
         "weeks": [min_week, meta["current_week"] - 1],
         "mae": {"espn": mae(X[:, 0]), "sleeper": mae(X[:, 1]), "usage": mae(X[:, 2]),
                 "ensemble_current": mae(current), "ensemble_fitted": mae(X @ fitted)},
+        "rmse": {"espn": rmse(X[:, 0]), "sleeper": rmse(X[:, 1]), "usage": rmse(X[:, 2]),
+                 "ensemble_current": rmse(current), "ensemble_fitted": rmse(X @ fitted)},
         "fitted_weights": {"espn": float(fitted[0]), "sleeper": float(fitted[1]), "usage": float(fitted[2])},
     }
     store.write("backtest_by_pos", by_pos)
     store.put_json("backtest", result)
+    horizon(meta)
+    sim_calibration(meta)
     return result
+
+
+def horizon(meta: dict) -> pl.DataFrame | None:
+    """Accuracy of projections made weeks ahead, from the daily snapshots: the trade engine lives on
+    rest-of-season numbers, and same-week accuracy says little about those. One row per horizon
+    (weeks between the snapshot and the game), using the first snapshot taken in each week."""
+    if not store.has("snap_proj"):
+        return None
+    actual = store.read("espn_weeks").filter(pl.col("actual").is_not_null() & (pl.col("week") < meta["current_week"]))
+    pos = store.read("players").select("espn_id", "pos").filter(pl.col("pos").is_in(["QB", "RB", "WR", "TE"]))
+    df = (store.read("snap_proj").sort("snap_date").unique(["espn_id", "week", "snap_week"], keep="first")
+          .join(actual.select("espn_id", "week", "actual"), on=["espn_id", "week"]).join(pos, on="espn_id")
+          .filter((pl.col("espn") > 0) | (pl.col("ens") > 0))
+          .with_columns((pl.col("week") - pl.col("snap_week")).alias("weeks_ahead")))
+    err = lambda c: (pl.col(c) - pl.col("actual")).abs().mean().alias(f"{c}_mae")  # noqa: E731
+    out = df.group_by("weeks_ahead").agg(err("ens"), err("espn"), err("sleeper"), pl.len().alias("n")).sort("weeks_ahead")
+    store.write("backtest_horizon", out)
+    return out
+
+
+def sim_calibration(meta: dict) -> dict | None:
+    """Did the simulation's weekly win probabilities come true? Scores the last snapshot before each finished
+    regular-season week against the result: Brier score (0.25 = coin flip, lower is better) and a bucket table."""
+    if not store.has("snap_sim"):
+        return None
+    snap = store.read("snap_sim")
+    if "p_win_next" not in snap.columns:
+        return None
+    result = store.read("schedule").filter(pl.col("outcome").is_in(["W", "L", "T"])).select(
+        "team_id", pl.col("week").cast(pl.Int64).alias("next_week"),
+        pl.col("outcome").replace_strict({"W": 1.0, "L": 0.0, "T": 0.5}, return_dtype=pl.Float64).alias("won"))
+    df = (snap.drop_nulls(["p_win_next", "next_week"]).filter(pl.col("p_win_next").is_not_nan())
+          .sort("snap_date").unique(["team_id", "next_week"], keep="last")
+          .join(result, on=["team_id", "next_week"]))
+    if not df.height:
+        return None
+    buckets = (df.with_columns((pl.col("p_win_next") * 5).floor().clip(0, 4).cast(pl.Int64).alias("b"))
+               .group_by("b").agg(pl.col("p_win_next").mean().alias("predicted"), pl.col("won").mean().alias("won"),
+                                  pl.len().alias("games")).sort("b")
+               .with_columns((pl.col("b") * 20).cast(pl.Utf8) + "–" + ((pl.col("b") + 1) * 20).cast(pl.Utf8) + "%")
+               .rename({"b": "bucket"}))
+    out = {"n": df.height, "weeks": sorted(df["next_week"].unique().to_list()),
+           "brier": float(((df["p_win_next"] - df["won"]) ** 2).mean())}
+    store.write("sim_calibration", buckets)
+    store.put_json("sim_calibration", out)
+    return out

@@ -2,7 +2,8 @@ import plotly.graph_objects as go
 import polars as pl
 import streamlit as st
 
-from aniston.ui import BLUE, ORANGE, as_pct, load, meta, page, pct, ready
+from aniston.ui import (BLUE, ORANGE, as_pct, load, load_opt, meta, page, pct, ready, refresh_running,
+                        start_refresh_unit, trades_closed)
 
 page("League")
 m = meta()
@@ -14,13 +15,18 @@ with st.sidebar:
 
     info = store.get_json("analysis") if store.settings().db_path.exists() else None
     st.write(f"Analysis: **{(info or {}).get('at', 'never')}**")
-    if st.button("Refresh data + rerun models", type="primary", width="stretch"):
+    if refresh_running():
+        st.info("Refresh is running in the background. The pages pick up the new analysis when it finishes.")
+        st.button("Check again", width="stretch")
+    elif st.button("Refresh data + rerun models", type="primary", width="stretch"):
+        if start_refresh_unit():  # the systemd unit: separate process, every core
+            st.rerun()
         from aniston.analyze import analyze
         from aniston.refresh import refresh
 
         with st.spinner("Pulling ESPN, Sleeper, nflverse..."):
             refresh()
-        with st.spinner("Projections, simulation, trade search (about 30s)..."):
+        with st.spinner("Projections, simulation, trade search..."):
             analyze()
         st.cache_data.clear()
         st.cache_resource.clear()
@@ -44,7 +50,9 @@ c[1].metric("Projected wins", f"{mine['exp_wins']:.1f}", f"of {m['reg_season_wee
 c[2].metric("Playoff odds", pct(mine["p_playoffs"]), f"ESPN says {m['espn_playoff_pct'][str(me)]:.0f}%", delta_color="off")
 c[3].metric("Bye odds", pct(mine["p_bye"]))
 c[4].metric("Title odds", pct(mine["p_title"]), f"{mine['p_title'] * len(teams):.1f}x an average team", delta_color="off")
-st.caption(f"Week {m['current_week']} in progress · trade deadline {m['trade_deadline'][:10]} · "
+deadline = (f"trade deadline {m['trade_deadline'][:10]}" + (" (passed)" if trades_closed() else "")
+            if m.get("trade_deadline") else "no trade deadline")
+st.caption(f"Week {m['current_week']} · {deadline} · "
            f"{m['playoff_teams']} make the playoffs (weeks {m['reg_season_weeks'] + 1}-{m['last_week']})")
 
 # ---- luck: actual wins vs all-play
@@ -93,6 +101,23 @@ with right:
     fig.update_xaxes(showgrid=True, gridcolor="rgba(128,128,128,0.15)")
     st.plotly_chart(fig, width="stretch")
     st.caption("Your team in orange. 5,000 simulated seasons of the remaining schedule and playoff bracket.")
+
+hist = load_opt("snap_sim")
+if hist is not None and hist["snap_date"].n_unique() >= 2:
+    st.subheader("Title odds over time")
+    fig = go.Figure()
+    for tid, name in teams.sort("team_id").select("team_id", "name").iter_rows():
+        h = hist.filter(pl.col("team_id") == tid).sort("snap_date")
+        mine_ = tid == me
+        fig.add_scatter(x=h["snap_date"], y=h["p_title"] * 100, name=name, mode="lines+markers",
+                        line=dict(color=ORANGE if mine_ else "rgba(128,128,128,0.35)", width=3 if mine_ else 1.5),
+                        marker=dict(size=7 if mine_ else 4),
+                        hovertemplate=f"{name}: %{{y:.1f}}%<extra></extra>")
+    fig.update_layout(height=320, margin=dict(l=0, r=0, t=10, b=0), yaxis_title="Championship probability (%)",
+                      showlegend=False, hovermode="closest")
+    fig.update_yaxes(rangemode="tozero", gridcolor="rgba(128,128,128,0.15)")
+    st.plotly_chart(fig, width="stretch")
+    st.caption("One point per day the analysis ran. Your team in orange; hover a line for the team.")
 
 st.subheader("Seed distribution")
 seed_cols = [c for c in sim.columns if c.startswith("seed_")]

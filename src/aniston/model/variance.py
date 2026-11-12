@@ -1,4 +1,5 @@
 """Weekly scoring volatility by position, fitted on last season's nflverse data."""
+import numpy as np
 import polars as pl
 
 from aniston import store
@@ -22,3 +23,17 @@ def position_cv(season: int) -> dict[str, float]:
         if pos in cv and n >= 10:
             cv[pos] = float(value)
     return cv
+
+
+PLAYER_CV_PRIOR_GAMES = 4.0
+
+
+def player_cv(players: pl.DataFrame, pos_cv: dict[str, float]) -> np.ndarray:
+    """Per-player weekly volatility: this season's own SD/mean, shrunk toward the position's CV (a handful of
+    games says little). Needs the `games`, `fp_pg`, `fp_sd` columns of the projection universe."""
+    base = np.array([pos_cv.get(p, 0.5) for p in players["pos"].to_list()])
+    g = players["games"].fill_null(0).to_numpy().astype(float)
+    mean = players["fp_pg"].fill_null(0.0).to_numpy().astype(float)
+    sd = players["fp_sd"].fill_null(np.nan).to_numpy().astype(float)
+    own = np.where((g >= 3) & (mean >= 4) & np.isfinite(sd), sd / np.maximum(mean, 1e-9), np.nan)
+    return np.where(np.isnan(own), base, (g * np.nan_to_num(own) + PLAYER_CV_PRIOR_GAMES * base) / (g + PLAYER_CV_PRIOR_GAMES))

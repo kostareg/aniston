@@ -20,6 +20,6 @@ def test_nflverse_scoring_matches_espn_actuals():
     assert close > 0.97, f"only {close:.1%} of player-weeks match ESPN scoring"
 
 
-def test_team_scores_match_player_sums():
+def test_teams_table_populated():
     teams = store.read("teams")
     assert teams.height == 12 and teams["points_for"].sum() > 0

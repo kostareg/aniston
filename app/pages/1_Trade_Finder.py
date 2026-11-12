@@ -1,7 +1,7 @@
 import polars as pl
 import streamlit as st
 
-from aniston.ui import as_pct, load, meta, page, ready, trade_context
+from aniston.ui import as_pct, load, log_offer_button, meta, page, ready, trade_context, trades_closed
 
 page("Trade Finder", "🤝")
 st.title("Trade Finder")
@@ -11,22 +11,32 @@ if not ready():
     st.stop()
 
 m = meta()
+if trades_closed():
+    st.info(f"The trade deadline ({m['trade_deadline'][:10]}) has passed, so the trade search no longer runs. "
+            "Waivers, streamers and start/sit are on the Waivers and My Team pages.")
+    st.stop()
 ideas = load("trade_ideas")
 
 with st.expander("Search again with constraints"):
     ctx = trade_context()
     my_idx = sorted(ctx.base[ctx.me], key=lambda i: -ctx.true.ros[i])
     label = lambda i: f"{ctx.names[i]} ({ctx.pos[i]})"  # noqa: E731
+    others = sorted((i for t, r in ctx.base.items() if t != ctx.me for i in r if ctx.tradeable[i]),
+                    key=lambda i: -ctx.true.ros[i])
+    owner = {i: t for t, r in ctx.base.items() for i in r}
+    targets = st.multiselect("Target: you get at least one of", others,
+                             format_func=lambda i: f"{label(i)} · {ctx.teams[owner[i]]}",
+                             help="Finds the best packages that land this player; only their owner is searched.")
     c1, c2, c3 = st.columns(3)
     untouch = c1.multiselect("Untouchable", my_idx, format_func=label)
-    must = c2.multiselect("Must include one of", my_idx, format_func=label)
+    must = c2.multiselect("You give at least one of", my_idx, format_func=label)
     partners = c3.multiselect("Only these partners", [t for t in ctx.base if t != ctx.me],
                               format_func=lambda t: ctx.teams[t])
     max_players = st.radio("Players per side", [1, 2], index=1, horizontal=True)
     if st.button("Search", type="primary"):
         with st.spinner("Searching packages and simulating the best ones..."):
             found = ctx.find(partners=partners or None, max_players=max_players,
-                             untouchable=set(untouch), must_include=set(must))
+                             untouchable=set(untouch), must_include=set(must), must_get=set(targets))
             st.session_state["custom_ideas"] = ctx.frame(found) if found else None
     if "custom_ideas" in st.session_state:
         if st.session_state["custom_ideas"] is None:
@@ -71,10 +81,15 @@ st.dataframe(
 )
 
 st.subheader("Why each trade works")
-for r in view.head(10).iter_rows(named=True):
+uidx = ctx.proj.idx()
+for n, r in enumerate(view.head(10).iter_rows(named=True)):
     with st.expander(f"{r['partner']}: give {r['give']} → get {r['get']}  ·  title {r['d_title'] * 100:+.1f} pts, "
                      f"accept {r['p_accept'] * 100:.0f}%"):
         for line in r["why"].split(" | "):
             st.markdown(f"- {line}")
         st.caption(f"Simulation standard error on Δ title: ±{r['d_title_se'] * 100:.1f} pts. "
                    f"Partner's own title odds change: {r['partner_d_title'] * 100:+.1f} pts.")
+        give, get = [uidx.get(e) for e in r["give_ids"]], [uidx.get(e) for e in r["get_ids"]]
+        if None not in give + get and set(give) <= set(ctx.base[ctx.me]) and set(get) <= set(ctx.base[r["partner_id"]]):
+            if st.checkbox("I sent this offer", key=f"sent_{n}"):
+                log_offer_button(ctx, ctx.evaluate(ctx.build_trade(r["partner_id"], tuple(give), tuple(get))), f"f{n}")

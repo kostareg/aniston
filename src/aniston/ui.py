@@ -1,4 +1,6 @@
 """Shared dashboard helpers: cached loading, palette, formatting."""
+import shutil
+import subprocess
 import time
 
 import polars as pl
@@ -36,6 +38,54 @@ def _load(name: str, stamp: str) -> pl.DataFrame:
 
 def load(name: str) -> pl.DataFrame:
     return _load(name, _stamp())
+
+
+def load_opt(name: str) -> pl.DataFrame | None:
+    """A table that only exists once a newer `aniston analyze` has run; None until then."""
+    try:
+        return load(name) if store.has(name) else None
+    except Exception:  # noqa: BLE001 - database busy
+        return None
+
+
+REFRESH_UNIT = "aniston-refresh.service"
+
+
+def _systemctl(*args: str) -> subprocess.CompletedProcess | None:
+    if not shutil.which("systemctl"):
+        return None
+    return subprocess.run(["systemctl", "--user", *args], capture_output=True, text=True, timeout=15)
+
+
+def refresh_running() -> bool:
+    r = _systemctl("is-active", REFRESH_UNIT)
+    return r is not None and r.stdout.strip() in ("activating", "active")
+
+
+def start_refresh_unit() -> bool:
+    """Run refresh + analyze through the systemd unit: its own process, all cores, and the dashboard stays
+    responsive. False when the unit isn't installed (a dev checkout), so the caller can run in-process."""
+    r = _systemctl("cat", REFRESH_UNIT)
+    if r is None or r.returncode != 0:
+        return False
+    r = _systemctl("start", "--no-block", REFRESH_UNIT)
+    return r is not None and r.returncode == 0
+
+
+def trades_closed() -> bool:
+    from aniston.config import deadline_passed
+
+    return deadline_passed(meta())
+
+
+def log_offer_button(ctx, t, key: str):
+    """'Log as proposed' control for a scored Trade; writes to the offer log."""
+    from aniston.offers import log_offer
+
+    c1, c2 = st.columns([3, 1])
+    note = c1.text_input("Note", key=f"note_{key}", label_visibility="collapsed", placeholder="Note (optional)")
+    if c2.button("Log as proposed", key=f"log_{key}", width="stretch"):
+        st.success(f"Logged as offer #{log_offer(ctx, t, note)}. Update its outcome on the Offers page.")
 
 
 def meta() -> dict:

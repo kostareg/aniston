@@ -5,6 +5,8 @@ nflverse expected fantasy points (xFP), shrunk toward the projection sources. We
 whichever sources exist for that player-week.
 """
 from dataclasses import dataclass
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import numpy as np
 import polars as pl
@@ -15,6 +17,9 @@ from aniston.config import settings
 ESPN_TO_NFLVERSE = {"LAR": "LA", "WSH": "WAS"}
 USAGE_PRIOR_GAMES = 3.0  # how many games of the projection-source prior the usage model starts with
 XFP_WEIGHT = 0.6  # usage ppg = 0.6 * xFP/game + 0.4 * actual FP/game (xFP is the stickier signal)
+STREAM_POS = ("QB", "K", "D/ST")  # positions worth streaming week to week
+STREAM_WEEKS = 3  # the universe keeps each of these weeks' best free agents at the streaming positions
+NFL_TZ = ZoneInfo("America/New_York")  # nflverse kickoff times are US Eastern
 
 
 def nfl_team(espn_abbrev: str) -> str:
@@ -32,6 +37,24 @@ def bye_weeks() -> dict[str, list[int]]:
     return byes
 
 
+def week_started(meta: dict, now: datetime | None = None) -> bool:
+    """Has the current fantasy week kicked off? Until it has, a trade or pickup made today still changes this
+    week's lineup, so the week counts as a future one. True on a live score or once the first kickoff has passed;
+    data without kickoff times keeps the old behaviour (current week treated as under way)."""
+    if store.has("live"):
+        live = store.read("live")
+        if live.height and (live["live_score"] != 0).any():
+            return True
+    sched = store.read("nfl_schedule")
+    if "gameday" not in sched.columns:
+        return True
+    games = sched.filter(pl.col("week") == meta["current_week"]).drop_nulls(["gameday", "gametime"])
+    if not games.height:
+        return True
+    first = min(datetime.fromisoformat(f"{d}T{t}") for d, t in games.select("gameday", "gametime").iter_rows())
+    return (now or datetime.now(NFL_TZ)) >= first.replace(tzinfo=NFL_TZ)
+
+
 def usage_table(season: int, through_week: int) -> pl.DataFrame:
     """Per-player season usage summary from nflverse, keyed by espn_id."""
     ids = store.read("ids").filter(pl.col("espn_id").is_not_null() & pl.col("gsis_id").is_not_null()).unique("gsis_id")
@@ -42,6 +65,7 @@ def usage_table(season: int, through_week: int) -> pl.DataFrame:
         .agg(
             pl.len().alias("games"),
             pl.col("league_points").mean().alias("fp_pg"),
+            pl.col("league_points").std().alias("fp_sd"),
             pl.col("total_fantasy_points_exp").mean().alias("xfp_pg"),
             pl.col("league_points").tail(3).mean().alias("last3_pg"),
             pl.col("target_share").mean().alias("target_share"),
@@ -56,10 +80,11 @@ def usage_table(season: int, through_week: int) -> pl.DataFrame:
 
 @dataclass
 class Projections:
-    """Dense matrices over the player universe for the future weeks, plus the current week on its own (the season
-    simulation takes the current week from ESPN's live team scores; the current week's column is for lineup advice)."""
+    """Dense matrices over the player universe for the weeks still to be played in full, plus the current week on
+    its own for lineup advice. Before the current week's first kickoff it is one of `weeks`; once it is under way
+    the season simulation takes it from ESPN's live team scores instead."""
 
-    weeks: list[int]  # future weeks, e.g. [7..16]
+    weeks: list[int]  # weeks a roster move can still change, e.g. [7..16]
     players: pl.DataFrame  # one row per universe player, row order == matrix row order
     ens: np.ndarray  # (P, W) ensemble projection
     espn: np.ndarray  # (P, W) ESPN projection (what other managers see)
@@ -76,11 +101,12 @@ def build(fa_per_pos: int = 15, through_week: int | None = None) -> Projections:
     s = settings()
     meta = store.get_json("meta")
     cur = meta["current_week"]
-    weeks = list(range(cur + 1, meta["last_week"] + 1))
+    first = 1 if week_started(meta) else 0  # matrix column where the still-changeable weeks begin
+    cols = list(range(cur, meta["last_week"] + 1))  # matrix columns: the current week, then the later weeks
+    weeks = cols[first:]
     through_week = through_week if through_week is not None else cur
 
     players = store.read("players")
-    cols = [cur] + weeks  # matrix columns: the current week, then the future weeks
     ew = store.read("espn_weeks").filter(pl.col("week").is_in(cols))
     ids = store.read("ids").filter(pl.col("espn_id").is_not_null()).unique("espn_id").select("espn_id", "sleeper_id")
     sw = store.read("sleeper_weeks").filter(pl.col("week").is_in(cols)) if store.has("sleeper_weeks") else None
@@ -88,8 +114,21 @@ def build(fa_per_pos: int = 15, through_week: int | None = None) -> Projections:
     espn_ros = ew.filter(pl.col("week").is_in(weeks)).group_by("espn_id").agg(pl.col("espn_proj").sum().alias("espn_ros"))
     players = players.join(espn_ros, on="espn_id", how="left").with_columns(pl.col("espn_ros").fill_null(0.0))
     rostered = players.filter(pl.col("fantasy_team_id") > 0)
-    fas = (players.filter(pl.col("fantasy_team_id") == 0)
-           .sort("espn_ros", descending=True).group_by("pos", maintain_order=True).head(fa_per_pos).select(players.columns))
+    # Free agents worth modelling: the best per position by the *higher* of ESPN's and Sleeper's ROS (ranking by
+    # ESPN alone would hide exactly the players ESPN underrates), plus each upcoming week's best streamers.
+    pool = players.filter(pl.col("fantasy_team_id") == 0).with_columns(pl.col("espn_ros").alias("pool_ros"))
+    if sw is not None and sw.height:
+        sl_ros = (sw.filter(pl.col("week").is_in(weeks)).join(ids.drop_nulls("sleeper_id"), on="sleeper_id")
+                  .group_by("espn_id").agg(pl.col("sleeper_proj").sum().alias("sleeper_ros")))
+        pool = pool.join(sl_ros, on="espn_id", how="left").with_columns(
+            pl.max_horizontal("espn_ros", "sleeper_ros").alias("pool_ros"))
+    best = pool.sort("pool_ros", descending=True).group_by("pos", maintain_order=True).head(fa_per_pos)["espn_id"]
+    streamers = (ew.filter(pl.col("week").is_in(cols[:STREAM_WEEKS]))
+                 .join(pool.filter(pl.col("pos").is_in(STREAM_POS)).select("espn_id", "pos"), on="espn_id")
+                 .sort("espn_proj", descending=True, nulls_last=True)
+                 .group_by("pos", "week", maintain_order=True).head(5)["espn_id"])
+    fas = (pool.filter(pl.col("espn_id").is_in(pl.concat([best, streamers]).unique().to_list()))
+           .sort("pool_ros", descending=True).select(players.columns))
     universe = pl.concat([rostered, fas]).join(ids, on="espn_id", how="left")
     usage = usage_table(s.season, through_week)
     universe = universe.join(usage, on="espn_id", how="left")
@@ -116,8 +155,8 @@ def build(fa_per_pos: int = 15, through_week: int | None = None) -> Projections:
     # Usage model: per-game rate from xFP and actual FP, shrunk toward the projection sources' ROS rate,
     # spread over the weeks where the player is expected to play (ESPN shows > 0).
     plays = espn > 0
-    n_ros = plays[:, 1:].sum(1)
-    src_rate = np.where(n_ros > 0, espn[:, 1:].sum(1) / np.maximum(n_ros, 1), 0.0)
+    n_ros = plays[:, first:].sum(1)
+    src_rate = np.where(n_ros > 0, espn[:, first:].sum(1) / np.maximum(n_ros, 1), 0.0)
     g = universe["games"].fill_null(0).to_numpy().astype(float)
     xfp = universe["xfp_pg"].fill_null(np.nan).to_numpy().astype(float)
     fp = universe["fp_pg"].fill_null(np.nan).to_numpy().astype(float)
@@ -143,8 +182,8 @@ def build(fa_per_pos: int = 15, through_week: int | None = None) -> Projections:
     ens = np.where(plays | (np.nan_to_num(sources.get("sleeper", np.zeros_like(espn))) > 0), ens, 0.0)
 
     universe = universe.with_columns(
-        pl.Series("ens_ros", ens[:, 1:].sum(1)),
+        pl.Series("ens_ros", ens[:, first:].sum(1)),
         pl.Series("usage_rate", usage_rate),
     )
-    return Projections(weeks=weeks, players=universe, ens=ens[:, 1:], espn=espn[:, 1:],
-                       sources={k: v[:, 1:] for k, v in sources.items()}, cur_week=cur, ens_cur=ens[:, 0])
+    return Projections(weeks=weeks, players=universe, ens=ens[:, first:], espn=espn[:, first:],
+                       sources={k: v[:, first:] for k, v in sources.items()}, cur_week=cur, ens_cur=ens[:, 0])

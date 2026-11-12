@@ -1,3 +1,4 @@
+from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
 
@@ -16,10 +17,13 @@ class Settings(BaseSettings):
     my_team_id: int | None = None  # derived from SWID when unset
     db_path: Path = ROOT / "data" / "aniston.duckdb"  # DB_PATH overrides; the NixOS module points it at the state dir
 
-    # Projection ensemble weights (renormalized over available sources per player-week). Backtest on weeks
-    # 2-5 of 2026 fit ESPN 0.36 / Sleeper 0.64 / usage 0.0; usage keeps a small share for its ROS signal.
-    w_espn: float = 0.38
-    w_sleeper: float = 0.55
+    # Projection ensemble weights (renormalized over available sources per player-week), fitted by squared
+    # error on weeks 2-9 of 2026 (2,586 player-weeks; bootstrap mean of the fit). Squared error, not absolute:
+    # the blend is used as a mean and summed into lineups, and the absolute-error fit (ESPN 0.31 / Sleeper 0.69
+    # / usage 0) is a median forecast. The optimum is flat: ESPN anywhere in 0.25-0.60 scores within noise on
+    # held-out weeks, and per-position weights did worse than one global set.
+    w_espn: float = 0.42
+    w_sleeper: float = 0.51
     w_usage: float = 0.07
 
     # Simulation.
@@ -41,6 +45,12 @@ class Settings(BaseSettings):
     acc_w_lineup: float = 0.06  # per perceived ROS starting-lineup point gained
     acc_w_value: float = 0.025  # per perceived value-over-replacement point gained
     acc_active_bonus: float = 0.3  # managers who have already traded this season are likelier to deal
+    # The partner's situation, from their simulated playoff odds p. A bubble team (p near 50%) weights
+    # regular-season weeks up by acc_urgency * 4p(1-p) and playoff weeks by p; a team below acc_dead_below has
+    # little left to play for in redraft and mostly stops answering offers.
+    acc_urgency: float = 0.5
+    acc_dead_below: float = 0.10
+    acc_dead_penalty: float = 0.8
     # League veto (ESPN vote): trades that look lopsided in your favour risk a veto.
     veto_bias: float = 3.0
     veto_w: float = 0.05  # per perceived value point you appear to win by
@@ -50,7 +60,17 @@ class Settings(BaseSettings):
     trade_sim_top_k: int = 60  # candidates that get the full season simulation
     trade_min_accept: float = 0.10
 
+    # Digest after each refresh (`aniston digest`): an ntfy topic URL (https://ntfy.sh/<topic>) or a Discord
+    # webhook URL. Unset = print only.
+    notify_url: str | None = None
+
 
 @lru_cache
 def settings() -> Settings:
     return Settings()
+
+
+def deadline_passed(meta: dict, now: datetime | None = None) -> bool:
+    """True once the league's trade deadline is behind us (no deadline set = trading stays open)."""
+    deadline = (meta or {}).get("trade_deadline")
+    return bool(deadline) and (now or datetime.now()) >= datetime.fromisoformat(deadline)

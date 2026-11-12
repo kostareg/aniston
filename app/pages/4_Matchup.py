@@ -3,6 +3,7 @@ import math
 import polars as pl
 import streamlit as st
 
+from aniston.model.startsit import win_prob
 from aniston.sim.season import remaining_sd
 from aniston.ui import load, meta, page, ready, team_names, trade_context
 
@@ -14,13 +15,6 @@ if not ready():
 m = meta()
 me, names = m["my_team_id"], team_names()
 live = load("live")
-
-
-def win_prob(mu_a, sd_a, mu_b, sd_b):
-    sd = math.hypot(sd_a, sd_b)
-    if sd == 0:  # every game is final: the result is decided
-        return 1.0 if mu_a > mu_b else 0.0 if mu_a < mu_b else 0.5
-    return 0.5 * (1 + math.erf((mu_a - mu_b) / (sd * math.sqrt(2))))
 
 
 row = live.filter(pl.col("team_id") == me)

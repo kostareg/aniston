@@ -22,11 +22,15 @@ class RosterValuer:
         self.ros = mat.sum(1)
         self.keep_score = self.ros  # what decides who gets cut; managers may judge by perceived value instead
         self.min_count = {p: n for p, n in spec.dedicated.items()}
-        self.value = lru_cache(maxsize=200_000)(self._value)
+        self.weekly = lru_cache(maxsize=200_000)(self._weekly)
 
-    def _value(self, roster: tuple[int, ...]) -> float:
+    def _weekly(self, roster: tuple[int, ...]) -> np.ndarray:
+        """Optimal-lineup points for each remaining week (W,)."""
         r = np.fromiter(roster, dtype=int)
-        return float(self.spec.evaluate(self.mat[r].T, self.pos[r]) @ self.w)
+        return self.spec.evaluate(self.mat[r].T, self.pos[r])
+
+    def value(self, roster: tuple[int, ...]) -> float:
+        return float(self.weekly(roster) @ self.w)
 
     def cap(self, roster) -> int:
         return self.active_cap + min(self.ir_slots, int(self.ir_ok[list(roster)].sum()))

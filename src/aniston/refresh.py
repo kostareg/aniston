@@ -32,7 +32,6 @@ def refresh() -> dict:
         "ids": lambda: nflverse.player_ids(),
         "usage": lambda: nflverse.weekly_usage([s.season - 1, s.season], meta["scoring"]),
         "nfl_schedule": lambda: nflverse.schedules(s.season),
-        "ecr": lambda: nflverse.ecr_weekly(),
         "sleeper_weeks": lambda: sleeper.fetch_projections(
             s.season, range(1, meta["last_week"] + 1), meta["scoring"]),
     }
@@ -44,5 +43,6 @@ def refresh() -> dict:
         except Exception as e:  # noqa: BLE001 - a broken source must not block the rest
             log.warning("source %s failed: %s", name, traceback.format_exc())
             report[name] = f"FAILED: {e}"
+    store.execute("DROP TABLE IF EXISTS ecr")  # fetched by earlier versions, never used
     store.put_json("refresh_report", report)
     return report

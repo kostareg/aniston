@@ -1,6 +1,8 @@
 """Plain-language reasons a trade works: why it helps you, why it looks good to them."""
 import numpy as np
 
+from aniston.config import settings
+
 
 def _player_notes(ctx, i: int) -> list[str]:
     p = ctx.players.row(i, named=True)
@@ -33,6 +35,12 @@ def rationale(ctx, t) -> str:
         parts.append("you drop " + ", ".join(nm[i] for i in t.my_moves["drop"]))
     parts.append(f"They see +{t.their_seen_gain:.0f} ESPN-projected lineup pts and {t.their_pvor_gain:+.0f} value; "
                  f"consensus says {t.their_true_gain:+.0f}")
+    s = settings()
+    p = t.partner_p_playoffs
+    if p < s.acc_dead_below:
+        parts.append(f"they're all but out ({p:.0%} playoff odds): little to play for, may not answer")
+    elif 0.2 <= p <= 0.8:
+        parts.append(f"they're on the bubble ({p:.0%} playoff odds): points in the next few weeks matter most to them")
     their_need = _need(ctx, t.partner, t.give)
     if their_need:
         parts.append(their_need)

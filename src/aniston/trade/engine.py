@@ -2,7 +2,8 @@
 season simulation on the most promising ones.
 
   my true gain        = consensus-projection ROS lineup points after vs before (after legal drops/pickups)
-  their seen gain     = ESPN-projection ROS lineup points for *their* roster after vs before
+  their seen gain     = ESPN-projection ROS lineup points for *their* roster after vs before, with the weeks
+                        weighted by their situation (a bubble team wants points now, a doomed one ignores playoffs)
   their value gain    = perceived value over replacement they receive minus what they give
   P(accept), P(no veto) from those perceived quantities
   final ranking       = Δ P(title) for me (paired simulation) x P(accept) x P(no veto)
@@ -18,7 +19,7 @@ from aniston import store
 from aniston.config import settings
 from aniston.model.projections import Projections, build
 from aniston.sim.season import Simulator, SimResult, current_rosters
-from aniston.trade.acceptance import p_accept, p_no_veto
+from aniston.trade.acceptance import p_accept, p_no_veto, partner_week_weights
 from aniston.trade.perceived import perceived_values
 from aniston.trade.roster import RosterValuer
 
@@ -38,6 +39,7 @@ class Trade:
     their_pvor_gain: float = 0.0
     p_accept: float = 0.0
     p_no_veto: float = 0.0
+    partner_p_playoffs: float = 1.0
     proxy: float = 0.0
     d_title: float | None = None
     d_title_se: float | None = None
@@ -74,6 +76,9 @@ class TradeContext:
 
         self.base = self._legal_baseline(current_rosters(self.proj))
         self.base_result = self.sim.run(self.base)
+        self.p_playoffs = {t: float(self.base_result.p_playoffs[self.sim.tix[t]]) for t in self.base}
+        is_playoff = np.array(self.proj.weeks) > self.meta["reg_season_weeks"]
+        self.week_weights = {t: partner_week_weights(self.seen.w, is_playoff, p) for t, p in self.p_playoffs.items()}
         traded = store.read("trades")["team_id"].unique().to_list() if store.has("trades") else []
         self.has_traded = set(traded)
         self.teams = dict(store.read("teams").select("team_id", "name").iter_rows())
@@ -106,11 +111,13 @@ class TradeContext:
                                                     protected=set(give))
         t.my_moves, t.their_moves = {"drop": d1, "add": a1}, {"drop": d2, "add": a2}
         t.their_true_gain = self.true.value(t.their_roster) - self.true.value(self.base[partner])
-        t.their_seen_gain = self.seen.value(t.their_roster) - self.seen.value(self.base[partner])
+        seen_by_week = self.seen.weekly(t.their_roster) - self.seen.weekly(self.base[partner])
+        t.their_seen_gain = float(seen_by_week @ self.week_weights[partner])
+        t.partner_p_playoffs = self.p_playoffs[partner]
         trade_pvor = float(self.pvor[list(give)].sum() - self.pvor[list(get)].sum())
         # The partner counts the player they must cut (and any pickup); the league votes on the trade alone.
         t.their_pvor_gain = trade_pvor + float(self.pvor[a2].sum() - self.pvor[d2].sum())
-        t.p_accept = p_accept(t.their_seen_gain, t.their_pvor_gain, partner in self.has_traded)
+        t.p_accept = p_accept(t.their_seen_gain, t.their_pvor_gain, partner in self.has_traded, t.partner_p_playoffs)
         t.p_no_veto = p_no_veto(-trade_pvor)
         t.proxy = t.my_gain * t.p_accept * t.p_no_veto
         return t
@@ -122,11 +129,14 @@ class TradeContext:
 
     def candidates(self, partners: list[int] | None = None, max_players: int = 2,
                    untouchable: set[int] = frozenset(), must_include: set[int] = frozenset(),
-                   workers: int = 1) -> list[Trade]:
-        """`workers` > 1 scores partners in forked processes; only use it outside Streamlit (forking a
-        threaded server is unsafe)."""
+                   must_get: set[int] = frozenset(), workers: int = 1) -> list[Trade]:
+        """`must_include`: I send at least one of these. `must_get`: I receive at least one of these (targets on
+        other rosters; only their owners are searched). `workers` > 1 scores partners in forked processes; only
+        use it outside Streamlit (forking a threaded server is unsafe)."""
         partners = partners or [t for t in self.base if t != self.me]
-        args = [(p, max_players, untouchable, must_include) for p in partners]
+        if must_get:
+            partners = [p for p in partners if must_get & set(self.base[p])]
+        args = [(p, max_players, untouchable, must_include, must_get) for p in partners]
         if workers > 1 and len(partners) > 1:
             global _FORK_CTX
             _FORK_CTX = self
@@ -142,12 +152,13 @@ class TradeContext:
         return out
 
     def _partner_candidates(self, p: int, max_players: int, untouchable: set[int],
-                            must_include: set[int]) -> list[Trade]:
+                            must_include: set[int], must_get: set[int] = frozenset()) -> list[Trade]:
         s = settings()
+        n = s.trade_pool_size  # 2-player packages draw on each side's top N, plus any player the search asks for
         my_all = self._pool(self.me, None, untouchable)
-        my_top = my_all[: s.trade_pool_size]
+        my_top = my_all[:n] + [i for i in my_all[n:] if i in must_include]
         their_all = self._pool(p, None, set())
-        their_top = their_all[: s.trade_pool_size]
+        their_top = their_all[:n] + [i for i in their_all[n:] if i in must_get]
         out = []
         shapes = [(1, 1)] + ([(2, 1), (1, 2), (2, 2)] if max_players >= 2 else [])
         for ng, nr in shapes:
@@ -156,6 +167,8 @@ class TradeContext:
                 if must_include and not must_include & set(give):
                     continue
                 for get in combinations(their_all if nr == 1 else their_top, nr):
+                    if must_get and not must_get & set(get):
+                        continue
                     t = self.build_trade(p, give, get, min_my_gain=0.0)
                     if t is not None and t.p_accept >= s.trade_min_accept:
                         out.append(t)
@@ -202,6 +215,7 @@ class TradeContext:
             "d_title": t.d_title, "d_title_se": t.d_title_se, "d_playoffs": t.d_playoffs, "d_wins": t.d_wins,
             "my_ros_gain": t.my_gain, "their_seen_gain": t.their_seen_gain, "their_true_gain": t.their_true_gain,
             "their_value_gain": t.their_pvor_gain, "partner_d_title": t.partner_d_title,
+            "partner_p_playoffs": t.partner_p_playoffs,
             "p_accept": t.p_accept, "p_no_veto": t.p_no_veto, "ev": t.ev, "why": rationale(self, t),
             "give_ids": [int(self.players["espn_id"][i]) for i in t.give],
             "get_ids": [int(self.players["espn_id"][i]) for i in t.get],

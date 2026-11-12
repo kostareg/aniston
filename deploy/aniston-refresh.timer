@@ -1,10 +1,16 @@
 [Unit]
-Description=Aniston refresh: Tue after MNF, Wed after waivers, Sun before kickoff
+Description=Aniston refresh: Tue after MNF, Wed after waivers, Thu before kickoff, Sun after inactives
 
 [Timer]
+# Times are the server's local clock and assume US Eastern (named zones in OnCalendar resolve as UTC on
+# NixOS unless systemd can find the tz database, so none are used); shift them if the server is elsewhere.
+# Thu: before the early Thanksgiving games and again before Thursday night kickoff (8:15pm ET).
+# Sun: after inactives are announced (11:30am ET), before the 1pm ET kickoffs.
 OnCalendar=Tue *-*-* 07:00
 OnCalendar=Wed *-*-* 09:00
-OnCalendar=Sun *-*-* 11:00
+OnCalendar=Thu *-*-* 11:00
+OnCalendar=Thu *-*-* 19:00
+OnCalendar=Sun *-*-* 12:00
 Persistent=true
 
 [Install]

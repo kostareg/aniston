@@ -1,7 +1,7 @@
 import polars as pl
 import streamlit as st
 
-from aniston.ui import page, ready, trade_context
+from aniston.ui import log_offer_button, page, ready, trade_context, trades_closed
 
 page("Trade Analyzer", "⚖️")
 st.title("Trade Analyzer")
@@ -9,6 +9,8 @@ st.caption("Build any trade and see the full before/after: your odds, theirs, wh
 if not ready():
     st.stop()
 
+if trades_closed():
+    st.info("The trade deadline has passed; this is hypothetical from here on.")
 ctx = trade_context()
 partner = st.selectbox("Trade partner", [t for t in ctx.base if t != ctx.me], format_func=lambda t: ctx.teams[t])
 label = lambda i: f"{ctx.names[i]} ({ctx.pos[i]}, {ctx.true.ros[i]:.0f} ROS)"  # noqa: E731
@@ -42,6 +44,11 @@ st.markdown(
 | Δ title odds | **{t.d_title * 100:+.1f} pts** | {t.partner_d_title * 100:+.1f} pts |
 """
 )
+
+if not trades_closed():
+    st.caption("Sent this offer? Log it, then record how it ended on the Offers page: that is the data the "
+               "acceptance model is checked against.")
+    log_offer_button(ctx, t, "analyzer")
 
 from aniston.trade.explain import rationale  # noqa: E402
 
