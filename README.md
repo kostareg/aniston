@@ -21,6 +21,7 @@ cp .env.example .env   # fill ESPN_S2 and SWID (browser cookies from espn.com); 
 ```fish
 uv run aniston refresh     # pull ESPN, Sleeper (RotoWire projections), nflverse into data/aniston.duckdb
 uv run aniston analyze     # projections, season sim, waivers, trade search (~30s); stores results
+uv run aniston reload      # refresh + analyze in one go
 uv run aniston trades -n 10 [--partner name]
 uv run aniston target "player name"   # best packages that land a specific player
 uv run aniston sim
@@ -38,7 +39,8 @@ outcome): they are the only data the acceptance model can be checked against.
 
 The dashboard runs as a systemd user service on port 1313, and a timer refreshes data and models and sends
 the digest (Tue after MNF, Wed after waivers, Thu before kickoff, Sun after inactives; the times assume the
-server's clock is US Eastern). The Home page's refresh button starts the same unit when it is installed. Clone to `~/Projects/aniston`, copy `.env`, then:
+server's clock is US Eastern); both are optional. Without the timer, reload by hand with `aniston reload` or the
+Home page's refresh button, which runs that command as its own process so the trade search uses every core. Clone to `~/Projects/aniston`, copy `.env`, then:
 
 ```fish
 mkdir -p ~/.config/systemd/user

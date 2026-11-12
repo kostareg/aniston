@@ -1,6 +1,6 @@
 """Shared dashboard helpers: cached loading, palette, formatting."""
-import shutil
 import subprocess
+import sys
 import time
 
 import polars as pl
@@ -48,28 +48,36 @@ def load_opt(name: str) -> pl.DataFrame | None:
         return None
 
 
-REFRESH_UNIT = "aniston-refresh.service"
+_RELOAD: dict = {"proc": None}  # the running `aniston reload`; this module outlives page reruns
 
 
-def _systemctl(*args: str) -> subprocess.CompletedProcess | None:
-    if not shutil.which("systemctl"):
-        return None
-    return subprocess.run(["systemctl", "--user", *args], capture_output=True, text=True, timeout=15)
+def reload_log():
+    return store.settings().db_path.parent / "reload.log"
 
 
-def refresh_running() -> bool:
-    r = _systemctl("is-active", REFRESH_UNIT)
-    return r is not None and r.stdout.strip() in ("activating", "active")
+def start_reload() -> None:
+    """Run `aniston reload` (refresh + analyze) as its own process: the trade search can then use every core
+    (forking inside Streamlit's threaded server is unsafe) and the dashboard stays responsive meanwhile."""
+    if reload_state() == "running":
+        return
+    log = reload_log()
+    log.parent.mkdir(parents=True, exist_ok=True)
+    with open(log, "w") as out:
+        _RELOAD["proc"] = subprocess.Popen([sys.executable, "-m", "aniston.cli", "reload"], stdout=out,
+                                           stderr=subprocess.STDOUT, start_new_session=True)
 
 
-def start_refresh_unit() -> bool:
-    """Run refresh + analyze through the systemd unit: its own process, all cores, and the dashboard stays
-    responsive. False when the unit isn't installed (a dev checkout), so the caller can run in-process."""
-    r = _systemctl("cat", REFRESH_UNIT)
-    if r is None or r.returncode != 0:
-        return False
-    r = _systemctl("start", "--no-block", REFRESH_UNIT)
-    return r is not None and r.returncode == 0
+def reload_state() -> str:
+    """'idle' (never started here), 'running', 'done' or 'failed'."""
+    proc = _RELOAD["proc"]
+    if proc is None:
+        return "idle"
+    code = proc.poll()
+    return "running" if code is None else "done" if code == 0 else "failed"
+
+
+def reload_clear() -> None:
+    _RELOAD["proc"] = None
 
 
 def trades_closed() -> bool:

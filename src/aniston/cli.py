@@ -31,6 +31,13 @@ def analyze(trades: bool = typer.Option(True, help="Also run the trade finder.")
 
 
 @app.command()
+def reload(workers: int = typer.Option(0, help="Processes for the trade finder (0 = all CPU cores).")):
+    """Refresh, then analyze: the whole manual reload in one command (what the dashboard's button runs)."""
+    refresh()
+    analyze(trades=True, workers=workers)
+
+
+@app.command()
 def backtest():
     """Score each projection source on completed weeks and fit ensemble weights."""
     import json

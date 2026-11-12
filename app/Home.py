@@ -2,8 +2,8 @@ import plotly.graph_objects as go
 import polars as pl
 import streamlit as st
 
-from aniston.ui import (BLUE, ORANGE, as_pct, load, load_opt, meta, page, pct, ready, refresh_running,
-                        start_refresh_unit, trades_closed)
+from aniston.ui import (BLUE, ORANGE, as_pct, load, load_opt, meta, page, pct, ready, reload_clear, reload_log,
+                        reload_state, start_reload, trades_closed)
 
 page("League")
 m = meta()
@@ -15,22 +15,24 @@ with st.sidebar:
 
     info = store.get_json("analysis") if store.settings().db_path.exists() else None
     st.write(f"Analysis: **{(info or {}).get('at', 'never')}**")
-    if refresh_running():
-        st.info("Refresh is running in the background. The pages pick up the new analysis when it finishes.")
-        st.button("Check again", width="stretch")
-    elif st.button("Refresh data + rerun models", type="primary", width="stretch"):
-        if start_refresh_unit():  # the systemd unit: separate process, every core
-            st.rerun()
-        from aniston.analyze import analyze
-        from aniston.refresh import refresh
 
-        with st.spinner("Pulling ESPN, Sleeper, nflverse..."):
-            refresh()
-        with st.spinner("Projections, simulation, trade search..."):
-            analyze()
-        st.cache_data.clear()
-        st.cache_resource.clear()
-        st.rerun()
+    @st.fragment(run_every="2s")
+    def reload_control():
+        state = reload_state()
+        if state == "running":
+            st.info("Pulling data and rerunning the models in a separate process...")
+            return
+        if state == "done":  # the new analysis has a new timestamp, which every cached table is keyed on
+            reload_clear()
+            st.rerun()
+        if state == "failed":
+            st.error("The reload failed. Last lines of its log:")
+            st.code("".join(reload_log().read_text().splitlines(keepends=True)[-12:]) or "(empty)")
+        if st.button("Refresh data + rerun models", type="primary", width="stretch"):
+            start_reload()
+            st.rerun()
+
+    reload_control()
 
 if not ready():
     st.stop()
